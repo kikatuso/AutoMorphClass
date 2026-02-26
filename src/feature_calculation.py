@@ -430,7 +430,6 @@ class Vessel_Features(FeatureExtractor):
         t2, t4, td = 0, 0, 0
         vessel_count = 0
         vessels = detect_vessel_border(window) 
-
         for vessel_nonsort in vessels:
             vessel_x, vessel_y = order_vessel_points(vessel_nonsort)
 
@@ -451,11 +450,10 @@ class Vessel_Features(FeatureExtractor):
         return t2, t4, td
 
     def _tortuosities(self,Z,window_size = None):
-
         if window_size is None:
-            window_size = Z.shape[0]  # process whole image as single window
-
-        windows, _ = split_into_windows(Z, window_size)
+            windows = [Z]
+        else:
+            windows, _ = split_into_windows(Z, window_size)
         t2, t4, td = 0, 0, 0
         for win in windows:
             t2_win, t4_win, td_win = self._tortuosity_per_window(win)
@@ -766,109 +764,3 @@ def order_vessel_points(vessel,return_ordered_indices=False):
     ordered_points = points[ordered_indices]
     return [ordered_points[:, 0].tolist(), ordered_points[:, 1].tolist()]
 
-if __name__ == "__main__":
-    from PIL import Image
-    import numpy as np
-    import os
-    import pandas as pd
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_pdf import PdfPages
-    from tqdm import tqdm
-
-    def open_image_as_numpy(path,mode='L'):
-        img = Image.open(path).convert(mode)
-        return np.expand_dims(np.array(img), axis=-1) if mode == 'L' else np.array(img) # keep as (H,W) for single channel, (H,W,C) for multi-channel
-
-    conditioning_df = pd.read_csv('/gpfs3/well/papiez/shared/UKBB/tinnitus_cohort/conditioning_ready_data.csv')[['Imagename','hypertension']].rename(columns={'Imagename':'Name'})
-
-    prefix = '/gpfs3/well/papiez/shared/UKBB/AutoMorph_segmentation/AutoMorph_21015_2/Results_1/M2/'
-    img_path = prefix + 'binary_vessel/binary_process/'
-    img_path_artery = prefix + 'artery_vein/artery_binary_process/'
-    img_path_vein = prefix + 'artery_vein/vein_binary_process/'
-
-    num_files = 1000
-    files = os.listdir(img_path)
-
-    keys = ['distance_tortuosity', 'squared_curvature_tortuosity', 'tortuosity_density']
-    tort = {}
-
-    for img_name in tqdm(files[:num_files], desc="Processing images"):
-        img_np = open_image_as_numpy(os.path.join(img_path, img_name),mode='L')
-        features = Vessel_Features(return_skeleton=False)(img_np)
-        tort[img_name] = features
-    
-    # vessels
-    for img_name in tqdm(files[:num_files], desc="Processing artery images"):
-        img_np = open_image_as_numpy(os.path.join(img_path_artery, img_name),mode='L')
-        features = Vessel_Features(return_skeleton=False)(img_np)
-        features = {f"artery_{k}": v for k, v in features.items()}
-        tort[img_name].update(features)
-
-    # veins
-    for img_name in tqdm(files[:num_files], desc="Processing vein images"):
-        img_np = open_image_as_numpy(os.path.join(img_path_vein, img_name),mode='L')
-        features = Vessel_Features(return_skeleton=False)(img_np)
-        features = {f"vein_{k}": v for k, v in features.items()}
-        tort[img_name].update(features)
-
-
-    for key in keys:
-
-        sorted_tort = sorted(tort.items(), key=lambda x: x[1][key], reverse=True)
-
-        top_10 = sorted_tort[:10]
-        bottom_10 = sorted_tort[-10:]
-
-        pdf = PdfPages(f'tortuosity_visualization_{key}.pdf')
-        for group_name, group in [('top', top_10), ('bottom', bottom_10)]:
-            for img_name, tort_features in group:
-                img_np = open_image_as_numpy(os.path.join(img_path, img_name),mode='L')
-                features = Vessel_Features(return_skeleton=True)(img_np)
-
-                vessel = img_np if img_np.ndim == 2 else img_np[:, :, 0]
-                skeleton = features['skeleton']
-
-                fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-                axes[0].imshow(vessel, cmap='gray')
-                axes[0].set_title(img_name)
-                axes[0].axis('off')
-
-                axes[1].imshow(skeleton, cmap='gray')
-                axes[1].set_title(f"{group_name}  {key}: {tort_features[key]:.4f}")
-                axes[1].axis('off')
-
-                pdf.savefig(fig)
-                plt.close(fig)
-
-        pdf.close()
-    
-    # link with conditioning_df
-    tort_df = pd.DataFrame.from_dict(tort, orient='index')
-    tort_df.index.name = 'Name'
-    tort_df.reset_index(inplace=True)
-    merged_df = pd.merge(tort_df, conditioning_df, on='Name', how='left')
-    print('Merged df shape:', merged_df.shape)
-    merged_df = merged_df.dropna()
-    print('Merged df shape after dropping NA:', merged_df.shape)
-
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.model_selection import cross_val_score
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.pipeline import Pipeline
-
-    x_cols = [c for c in merged_df.columns if c not in ['Name','hypertension']]
-    X = merged_df[x_cols].values
-    y = merged_df['hypertension'].values
-
-
-    pipe = Pipeline([
-        ('scaler', StandardScaler()),
-        ('model', LogisticRegression())
-    ])
-
-    scores = cross_val_score(pipe, X, y, cv=5, scoring='roc_auc')
-    print(f"Cross-validated AUC: {scores.mean():.4f} ± {scores.std():.4f}")
-
-    pipe.fit(X, y)
-    coefs = pd.Series(pipe.named_steps['model'].coef_[0], index=x_cols)
-    print(coefs.reindex(coefs.abs().sort_values(ascending=False).index))

@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import os
 import glob
+import matplotlib.pyplot as plt
 from time import time
 from .segmentation_models import Optic_Disc_Segmentation, Vessel_Segmentation,ArteryVeinSegmenter
 from .feature_calculation import AutoMorphNumpyWrapper, Optic_Disc_Cup_Features,Vessel_Features
@@ -20,14 +21,16 @@ mask_prefixes = [
 
 
 class AutoMorphModel(nn.Module):
-    def __init__(self, return_as_tensor=True,lightweight=False):
+    def __init__(self, return_as_tensor=True,lightweight=False, savemask_path=None):
         super().__init__()
+
         self.optic_disc_segmentator = Optic_Disc_Segmentation(resize=512,lightweight=lightweight)  
         self.vascular_segmentator = Vessel_Segmentation(resize=912,lightweight=lightweight) 
         self.artery_vein_segmentator = ArteryVeinSegmenter(resize=720,lightweight=lightweight)  
         self.optic_disc_cup_feature_calculator = AutoMorphNumpyWrapper(Optic_Disc_Cup_Features(),num_channels=2)
         self.vessel_feature_calculator = AutoMorphNumpyWrapper(Vessel_Features(),num_channels=1)
         self.return_as_tensor = return_as_tensor
+        self.savemask_path = savemask_path
         for param in self.parameters():
             param.requires_grad = False  
         self.eval()
@@ -101,12 +104,29 @@ class AutoMorphModel(nn.Module):
         zone_b_part = all_vessels_mask * zone_b # shape: (B, 3, H, W)
         zone_c_part = all_vessels_mask * zone_c # shape: (B, 3, H, W)
         vessel_output = torch.cat([orig, zone_b_part, zone_c_part], dim=1) # shape: (B, 9, H, W)
+        if self.savemask_path is not None:
+            self.plot_masks(self.savemask_path,vessel_output.clone())
+            self.plot_masks(self.savemask_path,optic_disc_mask.clone(),titles=["Optic Disc","Optic Cup"])
         return vessel_output, optic_disc_mask
     
     def _to_tensor(self, features):
         keys = sorted(features.keys())
         feature_tensor = torch.stack([features[k] for k in keys], dim=1)
         return feature_tensor
+
+    def plot_masks(self,savepath,masks,titles=["Vessels","Veins","Arteries","Zone B","Zone B Veins","Zone B Arteries","Zone C","Zone C Veins","Zone C Arteries"]):
+        if not os.path.exists(savepath):
+            os.makedirs(savepath, exist_ok=True)
+        B, C, H, W = masks.shape
+        assert C == len(titles), "Number of channels in masks should match number of titles"
+        for b in range(B):
+             for c in range(C):
+                plt.figure(figsize=(5,5))
+                plt.imshow(masks[b,c,:,:].detach().cpu().numpy(), cmap='gray')
+                plt.title(titles[c])
+                plt.axis('off')
+                plt.savefig(os.path.join(savepath,f"Sample{b}_{titles[c].replace(' ','_')}.png"))
+                plt.close()
 
     def forward(self, x):
         B = x.shape[0]
