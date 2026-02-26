@@ -23,7 +23,7 @@ class AutoMorphModel(nn.Module):
     def __init__(self, return_as_tensor=True,lightweight=False):
         super().__init__()
         self.optic_disc_segmentator = Optic_Disc_Segmentation(resize=512,lightweight=lightweight)  
-        self.vascular_segmentator = Vessel_Segmentation(resize=720,lightweight=lightweight) 
+        self.vascular_segmentator = Vessel_Segmentation(resize=912,lightweight=lightweight) 
         self.artery_vein_segmentator = ArteryVeinSegmenter(resize=720,lightweight=lightweight)  
         self.optic_disc_cup_feature_calculator = AutoMorphNumpyWrapper(Optic_Disc_Cup_Features(),num_channels=2)
         self.vessel_feature_calculator = AutoMorphNumpyWrapper(Vessel_Features(),num_channels=1)

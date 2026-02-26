@@ -5,7 +5,7 @@ from torchvision.transforms import ToTensor
 from src import AutoMorphModel
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-img_path = 'example_images/image2.png'
+img_path = 'example_images/image3.png'
 
 img = Image.open(img_path).convert('RGB')
 img_tensor = ToTensor()(img).unsqueeze(0).to(device)
