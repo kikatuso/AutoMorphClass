@@ -40,7 +40,7 @@ pip install torch torchvision pillow scikit-image opencv-python
 
 Then import relative to the repo root:
 ```python
-from src import AutoMorphModel
+from src.pytorch_automorph import AutoMorphModel
 ```
 
 > For CUDA-specific PyTorch builds, see [pytorch.org](https://pytorch.org/get-started/locally/) before running `pip install .`.
