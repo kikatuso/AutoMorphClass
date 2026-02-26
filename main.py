@@ -4,6 +4,19 @@ import os
 import glob
 
 from .models import Optic_Disc_Segmentation, Vessel_Segmentation,ArteryVeinSegmenter
+from .feature_calculation import AutoMorphNumpyWrapper, Optic_Disc_Cup_Features,Vessel_Features
+ 
+mask_prefixes = [
+    "",                 # 1 general vessels
+    "Vein_",            # 2
+    "Artery_",          # 3
+    "ZoneB_",           # 4
+    "ZoneB_Vein_",      # 5
+    "ZoneB_Artery_",    # 6
+    "ZoneC_",           # 7
+    "ZoneC_Vein_",      # 8
+    "ZoneC_Artery_",    # 9
+]
 
 
 class AutoMorphModel(nn.Module):
@@ -12,6 +25,8 @@ class AutoMorphModel(nn.Module):
         self.optic_disc_segmentator = Optic_Disc_Segmentation()
         self.vascular_segmentator = Vessel_Segmentation()
         self.artery_vein_segmentator = ArteryVeinSegmenter()
+        self.optic_disc_cup_feature_calculator = AutoMorphNumpyWrapper(Optic_Disc_Cup_Features(),num_channels=2)
+        self.vessel_feature_calculator = AutoMorphNumpyWrapper(Vessel_Features(),num_channels=1)
         for param in self.parameters():
             param.requires_grad = False  
         self.eval()
@@ -27,7 +42,6 @@ class AutoMorphModel(nn.Module):
         vertical_height = index_height.max() - index_height.min()
 
         return horizontal_width.item(), vertical_height.item()
-
 
     def _create_mask(self,mask, r1, r2, zone_centre):
         # binary mask shape: (B, H, W)
@@ -51,7 +65,6 @@ class AutoMorphModel(nn.Module):
 
         return ring
 
-    
     def define_zones(self,optic_disc_mask):
         # assuming optic_disc_mask shape: (B, C, H, W)
         disc = optic_disc_mask[:, 0:1, :, :]
@@ -76,17 +89,36 @@ class AutoMorphModel(nn.Module):
 
         return maskB, maskC
 
-    def forward(self, x):
+    @torch.no_grad()
+    def create_masks(self, x):
         optic_disc_mask = self.optic_disc_segmentator(x)[:,1:,:,:]  # take last two channels only; first channel is background
         zone_b, zone_c = self.define_zones(optic_disc_mask) # shape: (B, 1, H, W)
         vessel_mask = self.vascular_segmentator(x) # shape: (B, 1, H, W)
         artery_vein_mask = self.artery_vein_segmentator(x)[:,[0,2],:,:]  # take artery and vein channels only; red as vein, blue as artery
         all_vessels_mask = torch.cat([vessel_mask, artery_vein_mask], dim=1)
-        orig = all_vessels_mask # shape: (B, 4, H, W)
-        zone_b_part = all_vessels_mask * zone_b # shape: (B, 4, H, W)
-        zone_c_part = all_vessels_mask * zone_c # shape: (B, 4, H, W)
-        output = torch.cat([orig, zone_b_part, zone_c_part], dim=1) # shape: (B, 12, H, W)
-        return output
+        orig = all_vessels_mask # shape: (B, 3, H, W)
+        zone_b_part = all_vessels_mask * zone_b # shape: (B, 3, H, W)
+        zone_c_part = all_vessels_mask * zone_c # shape: (B, 3, H, W)
+        vessel_output = torch.cat([orig, zone_b_part, zone_c_part], dim=1) # shape: (B, 9, H, W)
+        return vessel_output, optic_disc_mask
+    
+    def forward(self, x):
+        B = x.shape[0]
+        vessel_output, optic_disc_mask = self.create_masks(x)
+        optic_disc_cup_features = self.optic_disc_cup_feature_calculator(optic_disc_mask)
+
+        vessel_long = vessel_output.reshape(-1, x.shape[2], x.shape[3]).unsqueeze(1) # shape: (B*9, 1, H, W)
+        vessel_features_long = self.vessel_feature_calculator(vessel_long) # shape: (B*9, num_vessel_features)
+        vessel_features = {}
+        for key, value in vessel_features_long.items():
+            value = value.view(B, 9)
+            for i, prefix in enumerate(mask_prefixes):
+                vessel_features[prefix + key] = value[:, i]
+
+        features = {**optic_disc_cup_features, **vessel_features}
+        return features
+
+        
 
 
 if __name__ == "__main__":
@@ -100,11 +132,7 @@ if __name__ == "__main__":
 
     img = Image.open(img_path).convert('RGB')
     img_tensor = ToTensor()(img).unsqueeze(0)  # Add batch dimension
-    output = model(img_tensor)
-    print(output.shape)  # Should be (1, 5, H, W)
+    features = model(img_tensor)
 
-    fig, axs = plt.subplots(1, output.shape[1], figsize=(20, 4))
-    for i in range(output.shape[1]):
-        axs[i].imshow(output[0, i].cpu().numpy(), cmap='gray')
-        axs[i].set_title(f'Channel {i+1}')
-    plt.savefig('test_output.png')
+    for key, value in features.items():
+        print(f"{key}: {value.item()}")

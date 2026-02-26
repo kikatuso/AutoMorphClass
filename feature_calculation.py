@@ -240,16 +240,12 @@ class Optic_Disc_Cup_Features(FeatureExtractor):
         )
     
     def __call__(self, img):
-
-        if img.shape[2] != 3:
-            # assuming a pytorch tensor
-            img = img.permute(1,2,0)
-            img = img * 255.0
-        img = img.numpy()
-
-        assert(img.shape[2] == 3), "Input image must have 3 channels (vascular segmentation, optic disc, optic cup)"
-
-        disc, cup = img[:,:,1], img[:,:,2]
+        if img.shape[2] == 3:
+            disc, cup = img[:,:,1], img[:,:,2]
+        elif img.shape[2] == 2:
+            disc, cup = img[:,:,0], img[:,:,1]
+        else:
+            raise ValueError("Input image must have 2 or 3 channels (vascular segmentation, optic disc, optic cup)")
         return self.optic_cup_features(disc, cup)
 
 
