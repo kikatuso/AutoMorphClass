@@ -60,7 +60,7 @@ class Single_Segmentator(nn.Module):
     
     def load_from_checkpoint(self, checkpoint_path):
         print(f'Loading model from {checkpoint_path}...') if self.verbose else ''
-        checkpoint = torch.load(checkpoint_path, weights_only=True)
+        checkpoint = torch.load(checkpoint_path, weights_only=True, map_location='cpu')
         if 'model_state_dict' in checkpoint:
             weights = checkpoint['model_state_dict']
         else:

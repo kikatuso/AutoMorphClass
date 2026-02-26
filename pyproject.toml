@@ -1,13 +1,19 @@
+[project]
+name = "pytorch_automorph"
+version = "0.1.0"
+description = "PyTorch wrapper for AutoMorph for automated retinal image analysis"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Zuzanna Wakefield-Skórniewska", email = "zuzanna.skorniewska@ndph.ox.ac.uk" }]
+requires-python = ">=3.8"
+dependencies = [
+  "torch",
+  "torchvision",
+  "pillow",
+  "scikit-image",
+  "opencv-python"
+]
+
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
-
-[project]
-name = "mypkg"
-version = "0.1.0"
-description = "Short description"
-readme = "README.md"
-requires-python = ">=3.8"
-authors = [{name="Your Name", email="you@example.com"}]
-license = {text="MIT"}
-dependencies = ["requests>=2.0"]   # runtime deps
