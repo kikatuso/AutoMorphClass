@@ -7,16 +7,14 @@ from .modules.lwnet import get_arch
 
 
 class Optic_Disc_Segmentation(nn.Module):
-    def __init__(self,verbose=False,mode='eval',checkpoint_folder=None,num_segmentators=1):
+    def __init__(self,checkpoint_folder='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/optic_disc_and_cup/',verbose=False,mode='eval',lightweight=False):
         super().__init__()
         self.mode = mode
-        if checkpoint_folder is None:
-            checkpoints = [None]*num_segmentators
-        else:
-            checkpoints = glob.glob(os.path.join(checkpoint_folder, '**', 'model_checkpoint.pth'), recursive=True)
-            assert len(checkpoints)>=num_segmentators, f"Found only {len(checkpoints)} checkpoints, but num_segmentators={num_segmentators}."
+        checkpoints = glob.glob(os.path.join(checkpoint_folder, '**', 'model_checkpoint.pth'), recursive=True)
+        if lightweight:
+            checkpoints = checkpoints[:1]  # Use only the first checkpoint for lightweight mode
         self.models = nn.ModuleList()  
-        for i in range(num_segmentators):
+        for i in range(len(checkpoints)):
             checkpoint = checkpoints[i] if checkpoint_folder is not None else None
             mi = Single_Segmentator(n_classes=3,model_checkpoint=checkpoint,mode=mode)
             self.models.append(mi)
@@ -63,3 +61,6 @@ class Single_Segmentator(nn.Module):
     
     def forward(self, x):  # Added self
         return self.model(x)
+
+if __name__ == "__main__":
+    model = Optic_Disc_Segmentation(verbose=True,mode='eval',lightweight=False)

@@ -1,60 +1,28 @@
 import os 
 import sys
+import glob
 from pathlib import Path
 import torch 
 import torch.nn as nn
 from torchvision.transforms.functional import resize
-from torch.utils.checkpoint import checkpoint
 
-from .conv_blocks import DoubleConv, Down, OutConv, Up_new
+from .modules.conv_blocks import DoubleConv, Down, OutConv, Up_new
 
-class SingleSegmenter(BaseSegmenter):
-    def __init__(self,input_channels=3, n_filters = 32, n_classes=1, bilinear=False,pth_path=None,ignore_keys=[],use_checkpoint=True,
-                 use_reentrant=False):
-        super().__init__(input_channels, n_filters, n_classes, bilinear)
-        self.use_reentrant = use_reentrant
-        self.use_checkpoint = use_checkpoint
-        if pth_path is not None:
-            self.init_from_pth(pth_path, ignore_keys=ignore_keys)
 
-    def init_from_pth(self, path, ignore_keys=list()):
-        sd = torch.load(path, map_location="cpu",weights_only=True)
-        keys = list(sd.keys())
-        for k in keys:
-            for ik in ignore_keys:
-                if k.startswith(ik):
-                    print("Deleting key {} from state_dict.".format(k))
-                    del sd[k]
-        missing, unexpected = self.load_state_dict(sd, strict=False,)
-        print(f"Restored from {path} with {len(missing)} missing and {len(unexpected)} unexpected keys")
-        if len(missing) > 0:
-            print(f"Missing Keys: {missing}")
-        if len(unexpected) > 0:
-            print(f"Unexpected Keys: {unexpected}")
-    
-    def _forward(self,x):
-        mask_pred = super().forward(x)
-        mask_pred_sigmoid = torch.sigmoid(mask_pred)
-        return mask_pred_sigmoid
-    def forward(self, x):
-        return checkpoint(self._forward, x, use_reentrant=self.use_reentrant) if self.use_checkpoint else self._forward(x)
-
-class Segmenter(nn.Module):
-    def __init__(self,pth_path,input_channels=3, n_filters = 32, n_classes=1, bilinear=False,ignore_keys=[],lightweight=True,
-                 return_soft_prob=False,use_checkpoint=True,use_reentrant=False,
-                 resize_to_912=True):
+class Vessel_Segmentation(nn.Module):
+    def __init__(self,checkpoint_folder='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/vessel_segmentation/',
+                input_channels=3, n_filters = 32, n_classes=1, bilinear=False,ignore_keys=[],lightweight=False,return_soft_prob=False,resize_to_912=True):
         super().__init__()  
-        self.use_reentrant = use_reentrant
-        self.use_checkpoint = use_checkpoint
         self.return_soft_prob = return_soft_prob
         self.resize_to_912 = resize_to_912
-        self.pth_files = os.listdir(pth_path)
+        self.pth_files = glob.glob(os.path.join(checkpoint_folder, '**', 'G_best_F1_epoch.pth'), recursive=True)
         if lightweight: # only use the first segmenter
+            print('Vessel_Segmentation: lightweight mode enabled, using only the first checkpoint.')
             self.pth_files = [self.pth_files[0]]
  
         self.models = nn.Sequential(*[
-            SingleSegmenter(input_channels, n_filters, n_classes, bilinear, os.path.join(pth_path,pth_file,'G_best_F1_epoch.pth'), ignore_keys,use_checkpoint,use_reentrant) 
-            for pth_file in self.pth_files])
+            SingleSegmenter(input_channels, n_filters, n_classes, bilinear, os.path.join(pth_path,pth_file), ignore_keys) 
+            for pth_path, pth_file in zip([os.path.dirname(pth_file) for pth_file in self.pth_files], self.pth_files)])
             
     def preprocess_working(self, img, threshold=40.0):
         # Ensure the image tensor has the shape (N, 3, W, H)
@@ -107,7 +75,7 @@ class Segmenter(nn.Module):
 
         return img, origW, origH
 
-    def _forward(self, x):
+    def forward(self, x):
         x,origW,origH = self.preprocess(x)
         x_sum = sum(model(x) for model in self.models)/len(self.models)
         if self.resize_to_912:
@@ -116,10 +84,6 @@ class Segmenter(nn.Module):
             x_sum = (x_sum > 0.5).float()
         return x_sum
     
-    def forward(self, x):
-        return checkpoint(self._forward, x, use_reentrant=self.use_reentrant) if self.use_checkpoint else self._forward(x)
-
-
 
 class BaseSegmenter(nn.Module):
     def __init__(self, input_channels, n_filters, n_classes, bilinear=False):
@@ -154,3 +118,33 @@ class BaseSegmenter(nn.Module):
         x = self.up4(x, x1)
         logits = self.outc(x)
         return logits
+    
+class SingleSegmenter(BaseSegmenter):
+    def __init__(self,input_channels=3, n_filters = 32, n_classes=1, bilinear=False,pth_path=None,ignore_keys=[],verbose=False):
+        super().__init__(input_channels, n_filters, n_classes, bilinear)
+        if pth_path is not None:
+            self.init_from_pth(pth_path, ignore_keys=ignore_keys,verbose=verbose)
+
+    def init_from_pth(self, path, ignore_keys=list(),verbose=False):
+        sd = torch.load(path, map_location="cpu",weights_only=True)
+        keys = list(sd.keys())
+        for k in keys:
+            for ik in ignore_keys:
+                if k.startswith(ik):
+                    print("Deleting key {} from state_dict.".format(k))  if verbose else ''
+                    del sd[k]
+        missing, unexpected = self.load_state_dict(sd, strict=False,)
+        print(f"Restored from {path} with {len(missing)} missing and {len(unexpected)} unexpected keys") if verbose else None
+        if len(missing) > 0:
+            print(f"Missing Keys: {missing}") if verbose else None
+        if len(unexpected) > 0:
+            print(f"Unexpected Keys: {unexpected}") if verbose else None
+    
+    def forward(self,x):
+        mask_pred = super().forward(x)
+        mask_pred_sigmoid = torch.sigmoid(mask_pred)
+        return mask_pred_sigmoid
+
+if __name__=='__main__':
+    model = Vessel_Segmentation()
+    

@@ -4,14 +4,15 @@ from pathlib import Path
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.transforms.functional as TF
+from torchvision.transforms import functional as TF
 import re
-from .conv_blocks import DoubleConv, Down, Up, OutConv, Up_new, side_one, side_two, side_three
+
+from .modules.conv_blocks import DoubleConv, Down, Up, OutConv, Up_new, side_one, side_two, side_three
 
 
 class ArteryVeinSegmenter(nn.Module):
     def __init__(self,
-                seed_path='/well/papiez/users/zwk579/Analysis/Automorph_and_augmentation/AutoMorph/M2_Artery_vein/ALL-AV/',
+                seed_path='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/AV_classification/',
                 input_channels=3, n_filters = 32, n_classes=4, bilinear=False,lightweight=False,eval=True,resize_to_720=True):
         super().__init__()  
         self.resize_to_720 = resize_to_720 # this is following the original implementation 
@@ -220,15 +221,3 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         seg = model(img_tensor)
-
-    import matplotlib.pyplot as plt 
-
-    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-    
-    axs[0].imshow(img_tensor.squeeze(0).detach().cpu().permute(1, 2, 0).numpy())
-    axs[0].set_title("Input Image")
-    axs[0].axis('off')
-    axs[1].imshow(seg.squeeze(0).detach().cpu().permute(1, 2, 0).numpy().astype(np.uint8))
-    axs[1].set_title("AV Segmentation")
-    axs[1].axis("off")
-    plt.savefig("/well/papiez/users/zwk579/Analysis/DiffusionModels/models/automorph/AV.png")
