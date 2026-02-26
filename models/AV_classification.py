@@ -13,9 +13,9 @@ from .modules.conv_blocks import DoubleConv, Down, Up, OutConv, Up_new, side_one
 class ArteryVeinSegmenter(nn.Module):
     def __init__(self,
                 seed_path='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/AV_classification/',
-                input_channels=3, n_filters = 32, n_classes=4, bilinear=False,lightweight=False,eval=True,resize_to_720=True,verbose=False):
+                input_channels=3, n_filters = 32, n_classes=4, bilinear=False,lightweight=False,eval=True,resize=720,verbose=False):
         super().__init__()  
-        self.resize_to_720 = resize_to_720 # this is following the original implementation 
+        self.resize = resize # this is following the original implementation 
         self.pth_files = self.find_folders(seed_path)
         self.n_classes = n_classes
         if lightweight: # only use the first segmenter
@@ -53,16 +53,16 @@ class ArteryVeinSegmenter(nn.Module):
 
     def forward(self, x):
         x = self._fix_scale(x)
-        if self.resize_to_720:
+        if self.resize is not None:
             oH, oW = x.shape[2], x.shape[3]
-            x = TF.resize(x, [720, 720], interpolation=TF.InterpolationMode.BILINEAR)
+            x = TF.resize(x, [self.resize, self.resize], interpolation=TF.InterpolationMode.BILINEAR)
         mean = sum(model(x) for model in self.models) / len(self.models)
         pred = mean.argmax(dim=1, keepdim=True)  # (B,1,H,W)
         artery  = (pred == 1).float()
         vein    = (pred == 2).float()
         overlap = (pred == 3).float()
         output = torch.cat([artery, overlap, vein], dim=1) * 255.0
-        if self.resize_to_720:
+        if self.resize is not None:
             output = TF.resize(output, [oH, oW], interpolation=TF.InterpolationMode.NEAREST)
         return output
 

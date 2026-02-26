@@ -11,10 +11,10 @@ from .modules.conv_blocks import DoubleConv, Down, OutConv, Up_new
 
 class Vessel_Segmentation(nn.Module):
     def __init__(self,checkpoint_folder='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/vessel_segmentation/',
-                input_channels=3, n_filters = 32, n_classes=1, bilinear=False,ignore_keys=[],lightweight=False,return_soft_prob=False,resize_to_912=True):
+                input_channels=3, n_filters = 32, n_classes=1, bilinear=False,ignore_keys=[],lightweight=False,return_soft_prob=False,resize=720):
         super().__init__()  
         self.return_soft_prob = return_soft_prob
-        self.resize_to_912 = resize_to_912
+        self.resize = resize
         self.pth_files = glob.glob(os.path.join(checkpoint_folder, '**', 'G_best_F1_epoch.pth'), recursive=True)
         if lightweight: # only use the first segmenter
             print('Vessel_Segmentation: lightweight mode enabled, using only the first checkpoint.')
@@ -24,34 +24,11 @@ class Vessel_Segmentation(nn.Module):
             SingleSegmenter(input_channels, n_filters, n_classes, bilinear, os.path.join(pth_path,pth_file), ignore_keys) 
             for pth_path, pth_file in zip([os.path.dirname(pth_file) for pth_file in self.pth_files], self.pth_files)])
             
-    def preprocess_working(self, img, threshold=40.0):
-        # Ensure the image tensor has the shape (N, 3, W, H)
-        origW,origH = img.shape[-2:]
-        W,H = max(origW,912),max(origH,912)
-        img = resize(img, (W,H))
-        if img.dim() == 3:
-            img = img.unsqueeze(0)
-        assert img.shape[1] == 3  # Check for 3 color channels
-        
-        # Convert threshold to 0-1 scale
-        threshold = threshold / 255.0
 
-        for i in range(img.shape[0]):
-            # Mask for pixels where the first channel value is greater than threshold
-            img_i = img[i]
-            mask = img_i[0, :, :] > threshold
-            img_i_masked = img_i[:, mask] 
-            mean_i = img_i_masked.mean(dim=1)
-            std_i = img_i_masked.std(dim=1)
-            img_i = (img_i - mean_i[:, None, None]) / std_i[:, None, None]
-            img[i] = img_i
-
-        return img, origW, origH
-    
     def preprocess(self, img, threshold=40.0):
         origW, origH = img.shape[-2:]
-        if self.resize_to_912:
-            W, H = max(origW, 912), max(origH, 912)
+        if self.resize is not None:
+            W, H = max(origW, self.resize), max(origH, self.resize)
             img = resize(img, (W, H))
         else:
             W, H = origW, origH
@@ -78,7 +55,7 @@ class Vessel_Segmentation(nn.Module):
     def forward(self, x):
         x,origW,origH = self.preprocess(x)
         x_sum = sum(model(x) for model in self.models)/len(self.models)
-        if self.resize_to_912:
+        if self.resize is not None:
             x_sum = resize(x_sum, (origW,origH))
         if not self.return_soft_prob:
             x_sum = (x_sum > 0.5).float()

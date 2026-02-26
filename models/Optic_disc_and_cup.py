@@ -8,11 +8,11 @@ from .modules.lwnet import get_arch
 
 
 class Optic_Disc_Segmentation(nn.Module):
-    def __init__(self,checkpoint_folder='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/optic_disc_and_cup/',verbose=False,mode='eval',lightweight=False,return_soft_prob=False,resize_to_512=True):
+    def __init__(self,checkpoint_folder='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/optic_disc_and_cup/',verbose=False,mode='eval',lightweight=False,return_soft_prob=False,resize=512):
         super().__init__()
         self.mode = mode
         self.return_soft_prob = return_soft_prob
-        self.resize_to_512 = resize_to_512
+        self.resize = resize
         checkpoints = glob.glob(os.path.join(checkpoint_folder, '**', 'model_checkpoint.pth'), recursive=True)
         if lightweight:
             checkpoints = checkpoints[:1]  # Use only the first checkpoint for lightweight mode
@@ -30,9 +30,9 @@ class Optic_Disc_Segmentation(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def forward(self, x): 
-        if self.resize_to_512:
+        if self.resize is not None:
             origW, origH = x.shape[-2:]
-            x = resize(x, (512, 512))
+            x = resize(x, (self.resize, self.resize))
         if self.mode == 'eval':
             outputs = [m(x) for m in self.models]
             stacked = torch.stack(outputs, dim=0)  # Stack along new dimension
@@ -43,7 +43,7 @@ class Optic_Disc_Segmentation(nn.Module):
             pooled = self.models[ridx](x)
         if not self.return_soft_prob:
             pooled = (pooled > 0.5).float()
-        if self.resize_to_512:
+        if self.resize is not None:
             pooled = resize(pooled, (origW, origH))
         return pooled
         
