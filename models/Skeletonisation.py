@@ -7,14 +7,18 @@ from .modules.lwnet import get_arch
 from .Optic_disc_and_cup import Single_Segmentator
 
 class Skeletonisation(Single_Segmentator):
-    def __init__(self,model_checkpoint='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/skeletonisation/skel_checkpoint.pth',verbose=False,mode='eval'):
+    def __init__(self,model_checkpoint='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/skeletonisation/skel_checkpoint.pth',verbose=False,mode='eval',return_soft_prob=False):
         super().__init__(n_classes=1,in_c=1,model_checkpoint=model_checkpoint,mode=mode)
+        self.return_soft_prob = return_soft_prob
         print(f"Skeletonisation initialised with {self._num_parameters():,} trainable parameters.") if verbose else ''
     def _num_parameters(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def forward(self, x):  # Added self
-        return super().forward(x)
+        out = super().forward(x)
+        if not self.return_soft_prob:
+            return (out > 0.5).float()
+        return out
 
 
 if __name__ == "__main__":

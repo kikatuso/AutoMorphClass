@@ -13,7 +13,7 @@ from .modules.conv_blocks import DoubleConv, Down, Up, OutConv, Up_new, side_one
 class ArteryVeinSegmenter(nn.Module):
     def __init__(self,
                 seed_path='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/AV_classification/',
-                input_channels=3, n_filters = 32, n_classes=4, bilinear=False,lightweight=False,eval=True,resize_to_720=True):
+                input_channels=3, n_filters = 32, n_classes=4, bilinear=False,lightweight=False,eval=True,resize_to_720=True,verbose=False):
         super().__init__()  
         self.resize_to_720 = resize_to_720 # this is following the original implementation 
         self.pth_files = self.find_folders(seed_path)
@@ -21,9 +21,9 @@ class ArteryVeinSegmenter(nn.Module):
         if lightweight: # only use the first segmenter
             self.pth_files = [self.pth_files[0]]
  
-        self.models = nn.Sequential(*[BaseSegmenter(input_channels, n_filters, n_classes, bilinear, pth_path=str(pth_file),verbose=False) for pth_file in self.pth_files])
+        self.models = nn.Sequential(*[BaseSegmenter(input_channels, n_filters, n_classes, bilinear, pth_path=str(pth_file),verbose=verbose) for pth_file in self.pth_files])
         if eval:
-            print(f"Setting {len(self.models)} segmenter(s) to eval mode.")
+            print(f"Setting {len(self.models)} segmenter(s) to eval mode.") if verbose else ''
             self.eval()
         
     def find_folders(self, base):

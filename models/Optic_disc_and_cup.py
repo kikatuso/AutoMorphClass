@@ -2,14 +2,17 @@ import os
 import glob
 import torch
 import torch.nn as nn
+from torchvision.transforms.functional import resize
 
 from .modules.lwnet import get_arch
 
 
 class Optic_Disc_Segmentation(nn.Module):
-    def __init__(self,checkpoint_folder='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/optic_disc_and_cup/',verbose=False,mode='eval',lightweight=False):
+    def __init__(self,checkpoint_folder='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/optic_disc_and_cup/',verbose=False,mode='eval',lightweight=False,return_soft_prob=False,resize_to_512=True):
         super().__init__()
         self.mode = mode
+        self.return_soft_prob = return_soft_prob
+        self.resize_to_512 = resize_to_512
         checkpoints = glob.glob(os.path.join(checkpoint_folder, '**', 'model_checkpoint.pth'), recursive=True)
         if lightweight:
             checkpoints = checkpoints[:1]  # Use only the first checkpoint for lightweight mode
@@ -27,15 +30,23 @@ class Optic_Disc_Segmentation(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def forward(self, x): 
+        if self.resize_to_512:
+            origW, origH = x.shape[-2:]
+            x = resize(x, (512, 512))
         if self.mode == 'eval':
             outputs = [m(x) for m in self.models]
             stacked = torch.stack(outputs, dim=0)  # Stack along new dimension
-            return torch.mean(stacked, dim=0)  # Average across models
+            pooled = torch.mean(stacked, dim=0)  # Average across models
         else:
             ridx = torch.randint(0, len(self.models), (1,)).item() # Randomly select a model index
             self.ridx = ridx
-            return self.models[ridx](x)
-
+            pooled = self.models[ridx](x)
+        if not self.return_soft_prob:
+            pooled = (pooled > 0.5).float()
+        if self.resize_to_512:
+            pooled = resize(pooled, (origW, origH))
+        return pooled
+        
 
 
 class Single_Segmentator(nn.Module):

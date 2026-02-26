@@ -6,6 +6,12 @@ from skimage.morphology import skeletonize
 import numpy as np
 import cv2
 
+from collections import deque
+import sys
+from scipy.spatial.distance import pdist, squareform
+from scipy.sparse.csgraph import minimum_spanning_tree
+ 
+
 
 class AutoMorphNumpyWrapper:
     """
@@ -614,11 +620,6 @@ def split_into_windows(image: np.ndarray, window_size: int, step: int = None):
     return valid_windows, positions
 
 
-## functions for tortuosity calculation
-from collections import deque
-
-
-
 def detect_vessel_border(arr: np.ndarray, ignored_pixels: int = 1, return_bifurcation_points: bool = False):
     """
     Extract vessel border polylines from a 2-D binary/skeleton image (NumPy array).
@@ -720,10 +721,6 @@ def derivative2_centered_h1(target, y):
     return (y[target + 1] - 2*y[target] + y[target - 1])/4
 
 
-import sys
-from scipy.spatial.distance import pdist, squareform
-from scipy.sparse.csgraph import minimum_spanning_tree
- 
 def order_vessel_points(vessel,return_ordered_indices=False):
     sys.setrecursionlimit(10000)  # or a higher value
 
