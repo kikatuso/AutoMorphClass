@@ -1,48 +1,62 @@
 # AutoMorphClass
 
-A PyTorch wrapper for automated retinal image analysis based on the AutoMorph pipeline.
+A PyTorch wrapper for automated retinal image analysis, built on top of the [AutoMorph](https://github.com/rmaphoh/AutoMorph) pipeline.
 
-`AutoMorphClass` performs:
+## Overview
 
-- Optic disc segmentation  
-- Vessel segmentation  
-- Artery/vein segmentation  
-- Extraction of quantitative retinal vascular features  
+`AutoMorphClass` provides a clean, plug-and-play PyTorch interface for extracting quantitative vascular features from retinal fundus images. It bundles the full AutoMorph segmentation pipeline into a single callable `nn.Module`, making it easy to integrate into existing research or clinical workflows.
 
-Designed for simple integration into PyTorch workflows and research pipelines.
+The pipeline performs:
+
+- **Optic disc segmentation**
+- **Vessel segmentation**
+- **Artery/vein segmentation**
+- **Quantitative retinal vascular feature extraction**
 
 ---
 
 ## Installation
 
-Clone the repository:
-
+### Option 1 — Install as a package (recommended)
 ```bash
 git clone https://github.com/kikatuso/AutoMorphClass.git
 cd AutoMorphClass
+pip install -e .
 ```
 
-Install dependencies:
+Then import directly in your code:
+```python
+from pytorch_automorph import AutoMorphModel
+```
 
+### Option 2 — Use in place
+
+Clone the repo and install dependencies manually:
 ```bash
-pip install torch torchvision pillow
+git clone https://github.com/kikatuso/AutoMorphClass.git
+cd AutoMorphClass
+pip install torch torchvision pillow scikit-image opencv-python
 ```
 
-Make sure you install the correct PyTorch version for your CPU or CUDA setup.
+Then import relative to the repo root:
+```python
+from src import AutoMorphModel
+```
+
+> For CUDA-specific PyTorch builds, see [pytorch.org](https://pytorch.org/get-started/locally/) before running `pip install .`.
 
 ---
 
-## Usage
-
+## Quick Start
 ```python
 from PIL import Image
 from torchvision.transforms import ToTensor
 import torch
-from src import AutoMorphModel
+from pytorch_automorph import AutoMorphModel
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Load image
+# Load and preprocess image
 img = Image.open("example_images/image2.png").convert("RGB")
 x = ToTensor()(img).unsqueeze(0).to(device)
 
@@ -51,11 +65,10 @@ model = AutoMorphModel(return_as_tensor=True).to(device)
 
 # Extract features
 features = model(x)
-print(features.shape)
+print(features.shape)  # (B, F)
 ```
 
-To return features as a dictionary instead of a tensor:
-
+To get named features as a dictionary:
 ```python
 model = AutoMorphModel(return_as_tensor=False).to(device)
 features_dict = model(x)
@@ -66,58 +79,58 @@ for name, value in features_dict.items():
 
 ---
 
-## API
+## API Reference
 
 ### `AutoMorphModel(return_as_tensor=True, lightweight=False)`
 
+A PyTorch `nn.Module` that wraps the full AutoMorph retinal analysis pipeline.
+
 **Parameters**
 
-- `return_as_tensor`  
-  - `True`: returns features as a tensor of shape `(B, F)`  
-  - `False`: returns a dictionary `{feature_name: value}`  
-
-- `lightweight`  
-  - Uses smaller segmentation backbones if available  
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `return_as_tensor` | `bool` | `True` | If `True`, returns a feature tensor of shape `(B, F)`. If `False`, returns a `dict` mapping feature names to scalar tensors. |
+| `lightweight` | `bool` | `False` | Uses smaller segmentation backbones when `True`, trading accuracy for speed. |
 
 **Input**
 
-- Tensor of shape `(B, 3, H, W)`  
-- Must be on the same device as the model  
+- A `torch.Tensor` of shape `(B, 3, H, W)` — a batch of RGB retinal images.
+- The tensor must reside on the same device as the model.
 
 **Output**
 
-- Feature tensor `(B, F)`  
-  or  
-- Dictionary of scalar tensors  
+- `return_as_tensor=True` → `torch.Tensor` of shape `(B, F)`
+- `return_as_tensor=False` → `dict[str, torch.Tensor]` of scalar feature values
 
-The model runs in evaluation mode and is intended for inference.
+> The model runs in **evaluation mode** and is designed for inference only.
 
 ---
 
-## Project Structure
+## Dependencies
 
-```text
-AutoMorphClass/
-│
-├── src/
-│   ├── __init__.py
-│   └── main.py
-│
-├── example.py
-├── example_images/
-└── pyproject.toml
-```
+- `torch`
+- `torchvision`
+- `pillow`
+- `scikit-image`
+- `opencv-python`
+
+---
+
+## Example Notebook
+
+An end-to-end usage example is provided in [`example.ipynb`](example.ipynb), demonstrating how to load images, run the model, and interpret the extracted vascular features.
 
 ---
 
 ## Reference
 
-Based on the original AutoMorph framework:
+This project is based on the original AutoMorph framework:
 
-https://github.com/rmaphoh/AutoMorph
+> **AutoMorph: Automated Retinal Vascular Morphology Quantification via a Deep Learning Pipeline**  
+> https://github.com/rmaphoh/AutoMorph
 
 ---
 
 ## License
 
-MIT License
+This project is licensed under the [MIT License](LICENSE).
