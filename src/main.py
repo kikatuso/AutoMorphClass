@@ -3,7 +3,7 @@ import torch.nn as nn
 import os
 import glob
 from time import time
-from .models import Optic_Disc_Segmentation, Vessel_Segmentation,ArteryVeinSegmenter
+from .segmentation_models import Optic_Disc_Segmentation, Vessel_Segmentation,ArteryVeinSegmenter
 from .feature_calculation import AutoMorphNumpyWrapper, Optic_Disc_Cup_Features,Vessel_Features
  
 mask_prefixes = [
@@ -128,24 +128,4 @@ class AutoMorphModel(nn.Module):
 
 
 # todo: add calibre features 
-
-if __name__ == "__main__":
-
-    print("Testing AutoMorphModel...")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = AutoMorphModel()
-    model.to(device)
-
-    from PIL import Image
-    from torchvision.transforms import ToTensor
-    import matplotlib.pyplot as plt
-
-    img_path = '/gpfs3/well/papiez/users/zwk579/Results/DiffusionModels/stable_diffusion/logs/stable_diffusion/07_10_2025_cross_conditioning_light/samples/sample_0.png'
-
-    img = Image.open(img_path).convert('RGB')
-    img_tensor = ToTensor()(img).unsqueeze(0).repeat(16, 1, 1, 1)  # shape: (3, 3, H, W)
-    features = model(img_tensor.to(device))
-
-    print(features.shape)
-
 
