@@ -114,19 +114,25 @@ class AutoMorphModel(nn.Module):
         feature_tensor = torch.stack([features[k] for k in keys], dim=1)
         return feature_tensor
 
-    def plot_masks(self,savepath,masks,titles=["Vessels","Veins","Arteries","Zone B","Zone B Veins","Zone B Arteries","Zone C","Zone C Veins","Zone C Arteries"]):
+    def plot_masks(self, savepath, masks, titles=["Vessels","Veins","Arteries","Zone B","Zone B Veins","Zone B Arteries","Zone C","Zone C Veins","Zone C Arteries"]):
         if not os.path.exists(savepath):
             os.makedirs(savepath, exist_ok=True)
+
         B, C, H, W = masks.shape
         assert C == len(titles), "Number of channels in masks should match number of titles"
+
         for b in range(B):
-             for c in range(C):
-                plt.figure(figsize=(5,5))
-                plt.imshow(masks[b,c,:,:].detach().cpu().numpy(), cmap='gray')
-                plt.title(titles[c])
+            for c in range(C):
+                fig = plt.figure(figsize=(5, 5))
+                plt.imshow(masks[b, c].detach().cpu().numpy(), cmap='gray')
                 plt.axis('off')
-                plt.savefig(os.path.join(savepath,f"Sample{b}_{titles[c].replace(' ','_')}.png"))
-                plt.close()
+                plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
+                plt.savefig(
+                    os.path.join(savepath, f"Sample{b}_{titles[c].replace(' ','_')}.png"),
+                    bbox_inches='tight',
+                    pad_inches=0
+                )
+                plt.close(fig)
 
     def forward(self, x):
         B = x.shape[0]
