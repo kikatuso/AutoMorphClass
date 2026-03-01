@@ -195,31 +195,3 @@ class Generator_branch(nn.Module):
         return logits,x_final
 
 
-
-if __name__ == "__main__":
-    # Example usage
-
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-    model = ArteryVeinSegmenter()
-    model.to(device)
-
-    from torchvision.transforms import ToTensor
-    from torchvision.transforms import Resize
-    to_tensor = ToTensor()
-
-
-    path = '/gpfs3/well/papiez/users/zwk579/Results/DiffusionModels/stable_diffusion/logs/stable_diffusion/07_10_2025_cross_conditioning_light/samples'
-    img_path = f"{path}/AUTOMORPH/M1/Good_quality/sample_0.png" # AUTOMORPH/M2/binary_vessel/raw/
-    from PIL import Image
-    import numpy as np
-
-    img = Image.open(img_path).convert('RGB')
-    img = img.resize((256, 256))  # match training size
-
-    img_tensor = to_tensor(img).unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        seg = model(img_tensor)
