@@ -8,11 +8,13 @@ from .modules.lwnet import get_arch
 
 
 class Optic_Disc_Segmentation(nn.Module):
-    def __init__(self,checkpoint_folder='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/optic_disc_and_cup/',verbose=False,mode='eval',lightweight=False,return_soft_prob=False,resize=512):
+    def __init__(self,checkpoint_folder='checkpoints/optic_disc_and_cup/',verbose=False,mode='eval',lightweight=False,return_soft_prob=False,resize=512):
         super().__init__()
         self.mode = mode
         self.return_soft_prob = return_soft_prob
         self.resize = resize
+        basedir = os.path.dirname(os.path.abspath(__file__))
+        checkpoint_folder = os.path.join(basedir, checkpoint_folder)
         checkpoints = glob.glob(os.path.join(checkpoint_folder, '**', 'model_checkpoint.pth'), recursive=True)
         if lightweight:
             checkpoints = checkpoints[:1]  # Use only the first checkpoint for lightweight mode

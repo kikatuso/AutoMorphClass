@@ -7,7 +7,9 @@ from .modules.lwnet import get_arch
 from .Optic_disc_and_cup import Single_Segmentator
 
 class Skeletonisation(Single_Segmentator):
-    def __init__(self,model_checkpoint='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/skeletonisation/skel_checkpoint.pth',verbose=False,mode='eval',return_soft_prob=False):
+    def __init__(self,model_checkpoint='checkpoints/skeletonisation/skel_checkpoint.pth',verbose=False,mode='eval',return_soft_prob=False):
+        basedir = os.path.dirname(os.path.abspath(__file__))
+        model_checkpoint = os.path.join(basedir, model_checkpoint)
         super().__init__(n_classes=1,in_c=1,model_checkpoint=model_checkpoint,mode=mode)
         self.return_soft_prob = return_soft_prob
         print(f"Skeletonisation initialised with {self._num_parameters():,} trainable parameters.") if verbose else ''

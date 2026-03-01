@@ -12,10 +12,12 @@ from .modules.conv_blocks import DoubleConv, Down, Up, OutConv, Up_new, side_one
 
 class ArteryVeinSegmenter(nn.Module):
     def __init__(self,
-                seed_path='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/AV_classification/',
+                seed_path='checkpoints/AV_classification/',
                 input_channels=3, n_filters = 32, n_classes=4, bilinear=False,lightweight=False,eval=True,resize=720,verbose=False):
         super().__init__()  
         self.resize = resize # this is following the original implementation 
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        seed_path = os.path.join(base_dir, seed_path)
         self.pth_files = self.find_folders(seed_path)
         self.n_classes = n_classes
         if lightweight: # only use the first segmenter

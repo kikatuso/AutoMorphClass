@@ -10,11 +10,13 @@ from .modules.conv_blocks import DoubleConv, Down, OutConv, Up_new
 
 
 class Vessel_Segmentation(nn.Module):
-    def __init__(self,checkpoint_folder='/well/papiez/users/zwk579/Analysis/AutoMorphClass/checkpoints/vessel_segmentation/',
+    def __init__(self,checkpoint_folder='checkpoints/vessel_segmentation/',
                 input_channels=3, n_filters = 32, n_classes=1, bilinear=False,ignore_keys=[],lightweight=False,return_soft_prob=False,resize=720):
         super().__init__()  
         self.return_soft_prob = return_soft_prob
         self.resize = resize
+        basedir = os.path.dirname(os.path.abspath(__file__))
+        checkpoint_folder = os.path.join(basedir, checkpoint_folder)
         self.pth_files = glob.glob(os.path.join(checkpoint_folder, '**', 'G_best_F1_epoch.pth'), recursive=True)
         if lightweight: # only use the first segmenter
             print('Vessel_Segmentation: lightweight mode enabled, using only the first checkpoint.')
