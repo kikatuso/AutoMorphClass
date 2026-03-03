@@ -133,25 +133,53 @@ class AutoMorphModel(nn.Module):
                     pad_inches=0
                 )
                 plt.close(fig)
+    
 
     def forward(self, x):
         B = x.shape[0]
+
+        # --- Step 1: Create masks ---
         vessel_output, optic_disc_mask = self.create_masks(x)
+
+        # --- Step 2: Optic disc features ---
         optic_disc_cup_features = self.optic_disc_cup_feature_calculator(optic_disc_mask)
 
-        vessel_long = vessel_output.reshape(-1, x.shape[2], x.shape[3]).unsqueeze(1) # shape: (B*9, 1, H, W)
-        vessel_features_long = self.vessel_feature_calculator(vessel_long) # shape: (B*9, num_vessel_features)
+        # Stack disc features to shape (B, 6)
+        disc_tensor = self._to_tensor(optic_disc_cup_features)
+
+        # Per-image invalid mask (B,)
+        invalid_disc_mask = (disc_tensor == -1).all(dim=1)
+
+        # --- Step 3: Vessel features ---
+        # vessel_output shape: (B, 9, H, W)
+        vessel_long = vessel_output.reshape(-1, x.shape[2], x.shape[3]).unsqueeze(1)
+        # shape: (B*9, 1, H, W)
+
+        vessel_features_long = self.vessel_feature_calculator(vessel_long)
+        # each value shape: (B*9,)
+
         vessel_features = {}
+
         for key, value in vessel_features_long.items():
+            # reshape to (B, 9)
             value = value.view(B, 9)
+
             for i, prefix in enumerate(mask_prefixes):
                 vessel_features[prefix + key] = value[:, i]
 
+        # --- Step 4: Suppress ZoneB / ZoneC per invalid image ---
+        for key in vessel_features:
+            if key.startswith(("ZoneB_", "ZoneC_")):
+                vessel_features[key][invalid_disc_mask] = -1
+
+        # --- Step 5: Merge features ---
         features = {**optic_disc_cup_features, **vessel_features}
+
+        # --- Step 6: Optional tensor conversion ---
         if self.return_as_tensor:
             features = self._to_tensor(features)
-        return features
 
+        return features
 
 # todo: add calibre features 
 

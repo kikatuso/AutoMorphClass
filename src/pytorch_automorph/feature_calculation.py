@@ -306,7 +306,7 @@ class Vessel_Features(FeatureExtractor):
     def _vessel_width(self,Z,Z_skeleton=None):
         if Z_skeleton is None:
             Z_skeleton = skeletonize(Z)
-        width = np.sum(Z)/np.sum(Z_skeleton)
+        width = np.sum(Z)/np.sum(Z_skeleton) if np.sum(Z_skeleton) > 0 else -1
         return width
 
     def _tortuosity_density(self, x, y):
@@ -336,7 +336,7 @@ class Vessel_Features(FeatureExtractor):
             a, b = indices[i], indices[i+1]
             xs, ys = x[a:b+1], y[a:b+1]
             Lc_si = self._curve_length(xs, ys)
-            Lx_si = self._chord_length(xs, ys)
+            Lx_si = self._chord_length(xs, ys) + self.eps
             if Lx_si > 0:
                 acc += (Lc_si / Lx_si) - 1
 
