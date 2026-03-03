@@ -35,17 +35,18 @@ class AutoMorphModel(nn.Module):
             param.requires_grad = False  
         self.eval()
     
-    def get_height_width(self,mask):
-        # mask shape: (B, H, W) or (H, W)
-        index = torch.where(mask > 0)
-
-        index_height = index[-2]
-        index_width = index[-1]
-
-        horizontal_width = index_width.max() - index_width.min()
-        vertical_height = index_height.max() - index_height.min()
-
-        return horizontal_width.item(), vertical_height.item()
+    def get_height_width(self, mask):
+        # mask: (H, W) or (1, H, W)
+        if mask.dim() == 3:
+            mask = mask.squeeze(0)
+        idx = torch.where(mask > 0)
+        if idx[0].numel() == 0:
+            return 0, 0
+        index_height = idx[0]
+        index_width = idx[1]
+        horizontal_width = (index_width.max() - index_width.min()).item()
+        vertical_height = (index_height.max() - index_height.min()).item()
+        return horizontal_width, vertical_height
 
     def _create_mask(self, H, W, r1, r2, zone_centre, device):
         """
