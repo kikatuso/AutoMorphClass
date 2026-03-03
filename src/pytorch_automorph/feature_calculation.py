@@ -19,22 +19,22 @@ class AutoMorphNumpyWrapper:
       - accepts batches
       - returns batched dictionaries
       - supports torch tensors or numpy arrays
-    NOTE: NumPy path is NOT differentiable; input tensors are detached.
     """
+    def __init__(self, single_extractor, num_channels=3,
+                run_single_func=None,
+                collate_disc=True,
+                return_masks=False):
 
-    def __init__(self, single_extractor, num_channels=3,run_single_func=None,collate_disc=True):
-        """
-        single_extractor: an object with a method
-            optic_cup_features(disc: np.ndarray(H,W), cup: np.ndarray(H,W)) -> dict[str, float]
-        and/or a __call__ that expects a single image in numpy (H,W,C).
-        """
         self.single = single_extractor
         self.num_channels = num_channels
+        self.collate_disc = collate_disc
+        self.return_masks = return_masks
+
         if run_single_func is None:
             self._run_single = self.single.__call__
         else:
             self._run_single = run_single_func.__get__(self.single)
-        self.collate_disc = collate_disc
+            
     def _to_numpy_hwc(self, x):
         """
         Convert a single image to numpy HxWxC (uint8 or float ok).
@@ -73,55 +73,72 @@ class AutoMorphNumpyWrapper:
         return out
 
     def __call__(self, img_or_batch):
-        """
-        Inputs supported:
-          - torch.Tensor (N,C,H,W) or (C,H,W)
-          - np.ndarray   (N,H,W,C) or (H,W,C) or (N,C,H,W)
-        Returns:
-          - If input is torch.Tensor -> dict[str, torch.Tensor] with shape (N,)
-          - Else -> dict[str, np.ndarray] with shape (N,)
-        """
+
         is_torch = torch.is_tensor(img_or_batch)
         device = img_or_batch.device if is_torch else None
 
-        # Normalize to a Python list of single images
+        # -------- Normalize input to list of HWC numpy images --------
         imgs = []
+
         if is_torch:
             x = img_or_batch
-            if x.dim() == 4:
-                # (N,C,H,W)
+            if x.dim() == 4:  # (N,C,H,W)
                 for i in range(x.shape[0]):
                     imgs.append(self._to_numpy_hwc(x[i]))
-            elif x.dim() == 3:
+            elif x.dim() == 3:  # (C,H,W)
                 imgs = [self._to_numpy_hwc(x)]
             else:
-                raise ValueError(f"Torch input must be (N,{self.num_channels},H,W) or ({self.num_channels},H,W)")
+                raise ValueError("Torch input must be (N,C,H,W) or (C,H,W)")
+
             imgs = [img * 255.0 for img in imgs]
+
         else:
             x = img_or_batch
             if isinstance(x, np.ndarray) and x.ndim == 4:
-                # could be (N,H,W,C) or (N,C,H,W)
                 if x.shape[1] == self.num_channels:  # (N,C,H,W)
                     x = np.transpose(x, (0, 2, 3, 1))
-                assert x.shape[-1] == self.num_channels, "Expected channels-last if numpy batch"
                 imgs = [x[i] for i in range(x.shape[0])]
             elif isinstance(x, np.ndarray) and x.ndim == 3:
                 imgs = [self._to_numpy_hwc(x)]
             else:
-                raise ValueError(f"NumPy input must be (N,H,W,{self.num_channels}), (N,{self.num_channels},H,W) or (H,W,{self.num_channels})")
+                raise ValueError("Invalid numpy input shape")
 
-        # Run per-sample
-        results = [self._run_single(im) for im in imgs]
-        if not self.collate_disc:
-            return results  # list of dicts, one per image
-        collated = self._collate_dicts(results)  # dict[str -> np.ndarray(N,)]
+        # -------- Run per-sample --------
+        feature_dicts = []
+        masks = [] if self.return_masks else None
 
-        # Convert back to torch if needed
+        for im in imgs:
+            result = self._run_single(im)
+
+            if self.return_masks:
+                feats, mask = result
+                feature_dicts.append(feats)
+                masks.append(mask)
+            else:
+                feature_dicts.append(result)
+
+        # -------- Collate features --------
+        collated_feats = self._collate_dicts(feature_dicts)
+
         if is_torch:
-            collated = {k: torch.from_numpy(v).to(device=device, dtype=torch.float32)
-                        for k, v in collated.items()}
-        return collated
+            collated_feats = {
+                k: torch.from_numpy(v).to(device=device, dtype=torch.float32)
+                for k, v in collated_feats.items()
+            }
 
+        # -------- Return depending on mode --------
+        if self.return_masks:
+            stacked_masks = np.stack(masks, axis=0)  # (B, H, W, C)
+            if is_torch:
+                stacked_masks = torch.from_numpy(stacked_masks).to(
+                    device=device, dtype=torch.float32
+                )
+                stacked_masks = stacked_masks.permute(0, 3, 1, 2)  # (B, C, H, W)
+            else:
+                stacked_masks = np.transpose(stacked_masks, (0, 3, 1, 2))  # (B, C, H, W)
+            return collated_feats, stacked_masks
+
+        return collated_feats
 
 class FeatureExtractor:
     def __init__(self):
@@ -150,19 +167,16 @@ class Optic_Disc_Cup_Features(FeatureExtractor):
     def columns(self):
         return ["disc_width","disc_height","cup_width","cup_height","cdr_vertical","cdr_horizontal"]
 
-
     def _keep_largest_region(self, binary_mask):
-        labeled = measure.label(binary_mask > 0)
-        regions = measure.regionprops(labeled)
-        if len(regions) == 0:
-            return np.zeros_like(binary_mask)
-        # Find largest region
-        largest_region = max(regions, key=lambda r: r.area)
-        # Create empty mask
-        clean_mask = np.zeros_like(binary_mask, dtype=np.uint8)
-        # Fill only largest region
-        coords = largest_region.coords
-        clean_mask[coords[:, 0], coords[:, 1]] = 255
+        binary_mask = (binary_mask > 0).astype(np.uint8)
+        labeled = measure.label(binary_mask, connectivity=2)
+        if labeled.max() == 0:
+            return np.zeros_like(binary_mask, dtype=np.uint8)
+        # Count pixels per label
+        counts = np.bincount(labeled.ravel())
+        counts[0] = 0  # ignore background
+        largest_label = counts.argmax()
+        clean_mask = (labeled == largest_label).astype(np.uint8) * 255
         return clean_mask
 
     def _calculate_width_height(self,mask):
@@ -234,8 +248,7 @@ class Optic_Disc_Cup_Features(FeatureExtractor):
         if not conditions_met:
             disc_width, disc_height, cup_width, cup_height,cdr_vertical,cdr_horizontal = -1, -1, -1, -1, -1, -1
 
-
-        return self._return_as_dict(
+        feats = self._return_as_dict(
             disc_width = disc_width,
             disc_height = disc_height,
             cup_width = cup_width,
@@ -243,6 +256,8 @@ class Optic_Disc_Cup_Features(FeatureExtractor):
             cdr_vertical = cdr_vertical,
             cdr_horizontal = cdr_horizontal
         )
+
+        return feats,np.stack([disc, cup], axis=-1) 
     
     def __call__(self, img):
         if img.shape[2] == 3:
@@ -307,7 +322,7 @@ class Vessel_Features(FeatureExtractor):
                 valid_sizes.append(size)
         # Need at least 2 points to fit a line
         if len(counts) < 2:
-            return -1  # or 0, depending on how you want to flag invalid
+            return -1 
         counts = np.array(counts)
         valid_sizes = np.array(valid_sizes)
         coeffs = np.polyfit(np.log(valid_sizes), np.log(counts), 1)
