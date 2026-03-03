@@ -134,7 +134,6 @@ class AutoMorphModel(nn.Module):
                 )
                 plt.close(fig)
     
-
     def forward(self, x):
         B = x.shape[0]
 

@@ -150,15 +150,20 @@ class Optic_Disc_Cup_Features(FeatureExtractor):
     def columns(self):
         return ["disc_width","disc_height","cup_width","cup_height","cdr_vertical","cdr_horizontal"]
 
+
     def _keep_largest_region(self, binary_mask):
-        mask = measure.label(binary_mask)                  
-        regions = measure.regionprops(mask)
-        regions.sort(key=lambda x: x.area, reverse=True)
-        if len(regions) > 1:
-            for rg in regions[1:]:
-                mask[rg.coords[:,0], rg.coords[:,1]] = 0
-        binary_mask[mask!=0] = 255
-        return binary_mask
+        labeled = measure.label(binary_mask > 0)
+        regions = measure.regionprops(labeled)
+        if len(regions) == 0:
+            return np.zeros_like(binary_mask)
+        # Find largest region
+        largest_region = max(regions, key=lambda r: r.area)
+        # Create empty mask
+        clean_mask = np.zeros_like(binary_mask, dtype=np.uint8)
+        # Fill only largest region
+        coords = largest_region.coords
+        clean_mask[coords[:, 0], coords[:, 1]] = 255
+        return clean_mask
 
     def _calculate_width_height(self,mask):
         index = np.where(mask>0)
@@ -275,7 +280,6 @@ class Vessel_Features(FeatureExtractor):
 
         assert(len(Z.shape) == 2)
 
-
         def boxcount(Z, k):
             # Get image dimensions
             rows, cols = Z.shape
@@ -288,19 +292,25 @@ class Vessel_Features(FeatureExtractor):
             block_sums = np.add.reduceat(row_sums, col_starts, axis=1)
             # Count boxes that are neither empty nor completely full
             partially_filled = (block_sums > 0) & (block_sums < k * k)
-
             return np.count_nonzero(partially_filled)
-
 
         p = min(Z.shape)
         n = 2**np.floor(np.log(p)/np.log(2))
         n = int(np.log(n)/np.log(2))
         sizes = 2**np.arange(n, 1, -1)
         counts = []
+        valid_sizes = []
         for size in sizes:
-            counts.append(boxcount(Z, size))
-
-        coeffs = np.polyfit(np.log(sizes), np.log(counts), 1)
+            c = boxcount(Z, size)
+            if c > 0:
+                counts.append(c)
+                valid_sizes.append(size)
+        # Need at least 2 points to fit a line
+        if len(counts) < 2:
+            return -1  # or 0, depending on how you want to flag invalid
+        counts = np.array(counts)
+        valid_sizes = np.array(valid_sizes)
+        coeffs = np.polyfit(np.log(valid_sizes), np.log(counts), 1)
         return -coeffs[0]
 
     def _vessel_width(self,Z,Z_skeleton=None):
