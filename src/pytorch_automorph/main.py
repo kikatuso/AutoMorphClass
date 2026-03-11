@@ -120,27 +120,33 @@ class AutoMorphModel(nn.Module):
         feature_tensor = torch.stack([features[k] for k in keys], dim=1)
         return feature_tensor
 
-    def plot_masks(self, savepath, masks, titles=["Vessels","Veins","Arteries","Zone B","Zone B Veins","Zone B Arteries","Zone C","Zone C Veins","Zone C Arteries"]):
-        if not os.path.exists(savepath):
-            os.makedirs(savepath, exist_ok=True)
-
+    def plot_masks(self, savepath, masks, titles=["Vessels","Veins","Arteries","Zone B","Zone B Veins","Zone B Arteries","Zone C","Zone C Veins","Zone C Arteries"], img_names=None):
+        os.makedirs(savepath, exist_ok=True)
         B, C, H, W = masks.shape
         assert C == len(titles), "Number of channels in masks should match number of titles"
-
+        if img_names is not None:
+            assert len(img_names) == B, "Number of image names should match batch size"
+            names = [os.path.splitext(os.path.basename(n))[0] for n in img_names]
+        else:
+            names = [f"Sample{b}" for b in range(B)]
+        # Create subfolders per title
+        for title in titles:
+            os.makedirs(os.path.join(savepath, title.replace(" ", "_")), exist_ok=True)
         for b in range(B):
             for c in range(C):
+                folder = os.path.join(savepath, titles[c].replace(" ", "_"))
                 fig = plt.figure(figsize=(5, 5))
                 plt.imshow(masks[b, c].detach().cpu().numpy(), cmap='gray')
                 plt.axis('off')
                 plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
                 plt.savefig(
-                    os.path.join(savepath, f"Sample{b}_{titles[c].replace(' ','_')}.png"),
+                    os.path.join(folder, f"{names[b]}.png"),
                     bbox_inches='tight',
                     pad_inches=0
                 )
                 plt.close(fig)
     
-    def forward(self, x):
+    def forward(self, x, x_names=None):
         B = x.shape[0]
 
         # --- Step 1: Create masks ---
@@ -181,8 +187,8 @@ class AutoMorphModel(nn.Module):
         features = {**optic_disc_cup_features, **vessel_features}
     
         if self.savemask_path is not None:
-            self.plot_masks(self.savemask_path,vessel_output.clone())
-            self.plot_masks(self.savemask_path,optic_disc_mask.clone(),titles=["Optic Disc","Optic Cup"])
+            self.plot_masks(self.savemask_path,vessel_output.clone(),img_names=x_names)
+            self.plot_masks(self.savemask_path,optic_disc_mask.clone(),titles=["Optic Disc","Optic Cup"],img_names=x_names)
 
         # --- Step 6: Optional tensor conversion ---
         if self.return_as_tensor:
