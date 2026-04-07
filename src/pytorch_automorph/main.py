@@ -151,10 +151,8 @@ class AutoMorphModel(nn.Module):
 
         # --- Step 1: Create masks ---
         vessel_output, optic_disc_mask = self.create_masks(x)
-
         # --- Step 2: Optic disc features ---
         optic_disc_cup_features, optic_disc_mask = self.optic_disc_cup_feature_calculator(optic_disc_mask)
-
         # Stack disc features to shape (B, 6)
         disc_tensor = self._to_tensor(optic_disc_cup_features)
 
@@ -164,7 +162,6 @@ class AutoMorphModel(nn.Module):
         # --- Step 3: Vessel features ---
         # vessel_output shape: (B, 9, H, W)
         vessel_long = vessel_output.reshape(-1, x.shape[2], x.shape[3]).unsqueeze(1)
-        # shape: (B*9, 1, H, W)
 
         vessel_features_long = self.vessel_feature_calculator(vessel_long)
         # each value shape: (B*9,)
@@ -193,7 +190,6 @@ class AutoMorphModel(nn.Module):
         # --- Step 6: Optional tensor conversion ---
         if self.return_as_tensor:
             features = self._to_tensor(features)
-
         return features
 
 # todo: add calibre features 

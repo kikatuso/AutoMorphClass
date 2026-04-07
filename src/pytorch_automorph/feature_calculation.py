@@ -61,6 +61,10 @@ class AutoMorphNumpyWrapper:
     def columns(self):
         return self.single.columns
 
+    def print_timing_summary(self):
+        for key, value in self.single.time_log.items():
+            print(f"{key}: {value:.4f} seconds")
+
     @staticmethod
     def _collate_dicts(dicts):
         """
@@ -463,9 +467,7 @@ class Vessel_Features(FeatureExtractor):
                 vessel_count += vessel_count_i
                 
                 t2 += self._distance_measure_tortuosity(vessel_x, vessel_y) * vessel_count_i
-                
                 t4 += self._squared_curvature_tortuosity(vessel_x, vessel_y) * vessel_count_i
-                
                 td += self._tortuosity_density(vessel_x, vessel_y) * vessel_count_i
                                         
         if vessel_count > 0:
@@ -639,81 +641,112 @@ def split_into_windows(image: np.ndarray, window_size: int, step: int = None):
     return valid_windows, positions
 
 
+import numpy as np
+from numba import njit
+
+@njit(cache=True)
+def _label_vessels(img, ignored_pixels):
+    H, W = img.shape
+
+    # pass 1: compute bifurcation mask from original img only
+    bif = np.zeros((H, W), np.uint8)
+
+    for x in range(ignored_pixels, H - ignored_pixels):
+        for y in range(ignored_pixels, W - ignored_pixels):
+            if img[x, y] == 1:
+                active = 0
+                for dx in (-1, 0, 1):
+                    nx = x + dx
+                    for dy in (-1, 0, 1):
+                        if dx == 0 and dy == 0:
+                            continue
+                        ny = y + dy
+                        if img[nx, ny] == 1:
+                            active += 1
+                if active > 2:
+                    bif[x, y] = 1
+
+    # pass 2: remove all bifurcation pixels at once
+    work = img.copy()
+    for x in range(H):
+        for y in range(W):
+            if bif[x, y] == 1:
+                work[x, y] = 0
+
+    # pass 3: connected-component labeling
+    labels = np.zeros((H, W), np.int32)
+    stack_x = np.empty(H * W, np.int32)
+    stack_y = np.empty(H * W, np.int32)
+    label = 0
+
+    for x in range(ignored_pixels, H - ignored_pixels):
+        for y in range(ignored_pixels, W - ignored_pixels):
+            if work[x, y] == 1 and labels[x, y] == 0:
+                label += 1
+                top = 0
+                stack_x[top] = x
+                stack_y[top] = y
+                top += 1
+                labels[x, y] = label
+
+                while top > 0:
+                    top -= 1
+                    cx = stack_x[top]
+                    cy = stack_y[top]
+
+                    for dx in (-1, 0, 1):
+                        nx = cx + dx
+                        if nx < ignored_pixels or nx >= H - ignored_pixels:
+                            continue
+                        for dy in (-1, 0, 1):
+                            if dx == 0 and dy == 0:
+                                continue
+                            ny = cy + dy
+                            if ny < ignored_pixels or ny >= W - ignored_pixels:
+                                continue
+                            if work[nx, ny] == 1 and labels[nx, ny] == 0:
+                                labels[nx, ny] = label
+                                stack_x[top] = nx
+                                stack_y[top] = ny
+                                top += 1
+
+    return labels, label, bif
+
 def detect_vessel_border(arr: np.ndarray, ignored_pixels: int = 1, return_bifurcation_points: bool = False):
-    """
-    Extract vessel border polylines from a 2-D binary/skeleton image (NumPy array).
-    Returns: list of [xs, ys] where xs/ys are lists of coordinates (ints).
-    """
-    # Ensure 2-D and binary, and work on a copy (don't mutate caller's array)
     img = np.asarray(arr)
     if img.ndim != 2:
         raise ValueError(f"detect_vessel_border expects a 2-D array, got shape {img.shape}")
-    img = (img > 0).astype(np.uint8).copy()
 
-    H, W = img.shape
+    labels, nlab, bif = _label_vessels((img > 0).astype(np.uint8), ignored_pixels)
 
-    def neighbours(x: int, y: int):
-        x_less = max(0, x - 1)
-        y_less = max(0, y - 1)
-        x_more = min(H - 1, x + 1)
-        y_more = min(W - 1, y + 1)
-        nbrs = []
-        if img[x_less, y_less]: nbrs.append((x_less, y_less))
-        if img[x_less, y     ]: nbrs.append((x_less, y     ))
-        if img[x_less, y_more]: nbrs.append((x_less, y_more))
-        if img[x     , y_less]: nbrs.append((x     , y_less))
-        if img[x     , y_more]: nbrs.append((x     , y_more))
-        if img[x_more, y_less]: nbrs.append((x_more, y_less))
-        if img[x_more, y     ]: nbrs.append((x_more, y     ))
-        if img[x_more, y_more]: nbrs.append((x_more, y_more))
-        return nbrs
+    flat = labels.ravel()
+    nz = flat > 0
+    idx = np.flatnonzero(nz)
+    lab = flat[nz]
 
-    def intersection_mask(base: np.ndarray, x: int, y: int):
-        # Count 8-neighborhood actives from the ORIGINAL (pre-masked) binary image `base`
-        x_less = max(0, x - 1)
-        y_less = max(0, y - 1)
-        x_more = min(H - 1, x + 1)
-        y_more = min(W - 1, y + 1)
-        active = int(base[x_less, y_less]) + int(base[x_less, y]) + int(base[x_less, y_more]) + \
-                 int(base[x,      y_less]) +                             int(base[x,      y_more]) + \
-                 int(base[x_more, y_less]) + int(base[x_more, y]) + int(base[x_more, y_more])
-        return active
+    order = np.argsort(lab, kind="mergesort")
+    idx = idx[order]
+    lab = lab[order]
 
-    bifurcation_points = []
-    # Build an intersection mask: zero pixels whose neighborhood is very branchy
-    base_bin = img.copy()
-    mask = np.ones_like(img, dtype=np.uint8)  # stays uint8
-    for x in range(ignored_pixels, H - ignored_pixels):
-        for y in range(ignored_pixels, W - ignored_pixels):
-            if base_bin[x, y]:
-                active = intersection_mask(base_bin, x, y)
-                if active > 2:
-                    bifurcation_points.append((y, x))
-                    cv2.circle(mask, (y, x), radius=1, color=0, thickness=-1)
-
-    img &= mask  # apply mask in-place, still uint8 binary
+    counts = np.bincount(lab, minlength=nlab + 1)
 
     vessels = []
+    start = 0
+    H, W = labels.shape
+    for k in range(1, nlab + 1):
+        n = counts[k]
+        if n:
+            sel = idx[start:start + n]
+            xs = (sel // W).tolist()
+            ys = (sel % W).tolist()
+            vessels.append([xs, ys])
+            start += n
 
-    # Extract connected polylines by flood-fill (BFS)
-    for x in range(ignored_pixels, H - ignored_pixels):
-        for y in range(ignored_pixels, W - ignored_pixels):
-            if img[x, y]:
-                q = deque([(x, y)])
-                xs, ys = [], []
-                while q:
-                    cx, cy = q.popleft()
-                    if img[cx, cy]:
-                        img[cx, cy] = 0  # consume
-                        xs.append(cx); ys.append(cy)
-                        q.extend(neighbours(cx, cy))
-                if xs:  # found one vessel
-                    vessels.append([xs, ys])
     if return_bifurcation_points:
-        bifurcation_points = np.array(bifurcation_points)
-        return vessels, bifurcation_points
-    else:
-        return vessels
+        return vessels, np.argwhere(bif)[:, ::-1]
+
+    return vessels
+
 
 def derivative1_centered_h1(target, y):
     """
@@ -740,52 +773,94 @@ def derivative2_centered_h1(target, y):
     return (y[target + 1] - 2*y[target] + y[target - 1])/4
 
 
-def order_vessel_points(vessel,return_ordered_indices=False):
-    sys.setrecursionlimit(10000)  # or a higher value
+@njit(cache=True)
+def _order_path(points):
+    n = points.shape[0]
+    if n == 0:
+        return np.empty(0, np.int32)
 
-    """
-    Order vessel points using MST + DFS to avoid large jumps.
-    Input: vessel = [[x1, x2, ...], [y1, y2, ...]]
-    Returns: ordered_vessel = [[x_sorted], [y_sorted]]
-    """
-    points = np.column_stack(vessel)
-    n = len(points)
- 
-    # Compute pairwise distances
-    dists = squareform(pdist(points))
- 
-    # Compute Minimum Spanning Tree (MST)
-    mst_sparse = minimum_spanning_tree(dists)
-    mst = mst_sparse.toarray().astype(float)
- 
-    # Make it symmetric (since MST is undirected)
-    mst = np.maximum(mst, mst.T)
- 
-    # Convert to adjacency list
-    graph = {i: [] for i in range(n)}
+    # Build occupancy grid over bounding box
+    xs = points[:, 0]
+    ys = points[:, 1]
+    min_x = xs.min()
+    min_y = ys.min()
+    max_x = xs.max()
+    max_y = ys.max()
+
+    H = max_x - min_x + 1
+    W = max_y - min_y + 1
+
+    occ = np.zeros((H, W), np.int32)
     for i in range(n):
-        for j in range(n):
-            if mst[i, j] > 0:
-                graph[i].append(j)
- 
-    # Find a leaf node to start (degree == 1)
-    degrees = [len(neighbors) for neighbors in graph.values()]
-    start_index = degrees.index(1) if 1 in degrees else 0
- 
-    # DFS traversal to order points
-    visited = np.zeros(n, dtype=bool)
-    ordered_indices = []
- 
-    def dfs(u):
-        visited[u] = True
-        ordered_indices.append(u)
-        for v in graph[u]:
-            if not visited[v]:
-                dfs(v)
- 
-    dfs(start_index)
-    if return_ordered_indices:
-        return ordered_indices
-    ordered_points = points[ordered_indices]
-    return [ordered_points[:, 0].tolist(), ordered_points[:, 1].tolist()]
+        occ[points[i, 0] - min_x, points[i, 1] - min_y] = i + 1  # store index+1
 
+    # Find an endpoint: pixel with exactly one 8-neighbor
+    start = 0
+    for i in range(n):
+        x = points[i, 0] - min_x
+        y = points[i, 1] - min_y
+        deg = 0
+        for dx in (-1, 0, 1):
+            nx = x + dx
+            if nx < 0 or nx >= H:
+                continue
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                ny = y + dy
+                if ny < 0 or ny >= W:
+                    continue
+                if occ[nx, ny] != 0:
+                    deg += 1
+        if deg == 1:
+            start = i
+            break
+
+    ordered = np.empty(n, np.int32)
+    visited = np.zeros(n, np.uint8)
+
+    cur = start
+    prev = -1
+
+    for t in range(n):
+        ordered[t] = cur
+        visited[cur] = 1
+
+        x = points[cur, 0] - min_x
+        y = points[cur, 1] - min_y
+
+        nxt = -1
+        for dx in (-1, 0, 1):
+            nx = x + dx
+            if nx < 0 or nx >= H:
+                continue
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                ny = y + dy
+                if ny < 0 or ny >= W:
+                    continue
+                j = occ[nx, ny] - 1
+                if j >= 0 and j != prev and visited[j] == 0:
+                    nxt = j
+                    break
+            if nxt != -1:
+                break
+
+        if nxt == -1:
+            break
+
+        prev = cur
+        cur = nxt
+
+    return ordered
+
+def order_vessel_points(vessel, return_ordered_indices=False):
+    points = np.column_stack(vessel).astype(np.int32)
+    order = _order_path(points)
+
+    if return_ordered_indices:
+        return order.tolist()
+
+    ordered = points[order]
+    return [ordered[:, 0].tolist(), ordered[:, 1].tolist()]
