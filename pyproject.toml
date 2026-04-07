@@ -11,7 +11,8 @@ dependencies = [
   "torchvision",
   "pillow",
   "scikit-image",
-  "opencv-python"
+  "opencv-python",
+  "numba"
 ]
 
 [build-system]
