@@ -21,9 +21,9 @@ mask_prefixes = [
 
 
 class AutoMorphModel(nn.Module):
-    def __init__(self, return_as_tensor=True,lightweight=False, savemask_path=None):
+    def __init__(self, return_as_tensor=True,lightweight=False, savemask_path=None,include_zones=True):
         super().__init__()
-
+        self.include_zones = include_zones
         self.optic_disc_segmentator = Optic_Disc_Segmentation(resize=512,lightweight=lightweight)  
         self.vascular_segmentator = Vessel_Segmentation(resize=912,lightweight=lightweight) 
         self.artery_vein_segmentator = ArteryVeinSegmenter(resize=720,lightweight=lightweight)  
@@ -105,14 +105,17 @@ class AutoMorphModel(nn.Module):
     @torch.no_grad()
     def create_masks(self, x):
         optic_disc_mask = self.optic_disc_segmentator(x)[:,1:,:,:]  # take last two channels only; first channel is background
-        zone_b, zone_c = self.define_zones(optic_disc_mask) # shape: (B, 1, H, W)
         vessel_mask = self.vascular_segmentator(x) # shape: (B, 1, H, W)
         artery_vein_mask = self.artery_vein_segmentator(x)[:,[0,2],:,:]  # take artery and vein channels only; red as vein, blue as artery
         all_vessels_mask = torch.cat([vessel_mask, artery_vein_mask], dim=1)
-        orig = all_vessels_mask # shape: (B, 3, H, W)
-        zone_b_part = all_vessels_mask * zone_b # shape: (B, 3, H, W)
-        zone_c_part = all_vessels_mask * zone_c # shape: (B, 3, H, W)
-        vessel_output = torch.cat([orig, zone_b_part, zone_c_part], dim=1) # shape: (B, 9, H, W)
+        if self.include_zones:
+            zone_b, zone_c = self.define_zones(optic_disc_mask) # shape: (B, 1, H, W)
+            orig = all_vessels_mask # shape: (B, 3, H, W)
+            zone_b_part = all_vessels_mask * zone_b # shape: (B, 3, H, W)
+            zone_c_part = all_vessels_mask * zone_c # shape: (B, 3, H, W)
+            vessel_output = torch.cat([orig, zone_b_part, zone_c_part], dim=1) # shape: (B, 9, H, W)
+        else:
+            vessel_output = all_vessels_mask # shape: (B, 3, H, W)
         return vessel_output, optic_disc_mask
     
     def _to_tensor(self, features):
@@ -169,8 +172,9 @@ class AutoMorphModel(nn.Module):
         vessel_features = {}
 
         for key, value in vessel_features_long.items():
-            # reshape to (B, 9)
-            value = value.view(B, 9)
+            # reshape to (B, 9/3)
+            nrows = 9 if self.include_zones else 3
+            value = value.view(B, nrows)
 
             for i, prefix in enumerate(mask_prefixes):
                 vessel_features[prefix + key] = value[:, i]
