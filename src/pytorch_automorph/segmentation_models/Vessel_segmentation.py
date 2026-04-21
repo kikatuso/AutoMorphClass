@@ -27,7 +27,7 @@ class Vessel_Segmentation(nn.Module):
             for pth_path, pth_file in zip([os.path.dirname(pth_file) for pth_file in self.pth_files], self.pth_files)])
             
 
-    def preprocess(self, img, threshold=40.0):
+    def preprocess(self, img, threshold=40.0/255.0):
         origW, origH = img.shape[-2:]
         if self.resize is not None:
             W, H = max(origW, self.resize), max(origH, self.resize)
@@ -38,25 +38,29 @@ class Vessel_Segmentation(nn.Module):
             img = img.unsqueeze(0)
         assert img.shape[1] == 3  # Check for 3 color channels
 
-        # Convert threshold to 0-1 scale
-        threshold = threshold / 255.0
+        # Blue channel zero-check: if blue channel is all zero, duplicate green channel
+        if img[:, 2, :, :].sum() == 0:
+            img = img[:, 1:2, :, :].expand(-1, 3, -1, -1).clone()
 
-        # Create a mask for pixels where the first channel value is greater than the threshold
+        # Threshold is on raw pixel scale (matching Code 1, no /255 conversion)
         mask = img[:, 0, :, :] > threshold  # Shape: (N, W, H)
-        img_masked = img * mask.unsqueeze(1)
 
-        # Calculate the mean and standard deviation of the masked pixels
-        mean = img_masked.mean(dim=(2, 3),keepdim=True)
-        std = img_masked.std(dim=(2, 3),keepdim=True)
+        # Compute mean/std only over masked (foreground) pixels, per channel
+        mask_expanded = mask.unsqueeze(1).expand_as(img)  # (N, C, W, H)
+        
+        mean = img[mask_expanded].view(img.shape[1], -1).mean(dim=1).view(1, img.shape[1], 1, 1)
+        std  = img[mask_expanded].view(img.shape[1], -1).std(dim=1).view(1, img.shape[1], 1, 1)
 
-        # Normalize the entire batch
+        # Normalize entire image using foreground statistics
         img = (img - mean) / std
 
         return img, origW, origH
 
+
     def forward(self, x):
         x,origW,origH = self.preprocess(x)
-        x_sum = sum(model(x) for model in self.models)/len(self.models)
+        mask_preds = [model(x) for model in self.models]
+        x_sum = sum(mask_preds) / len(mask_preds)
         if self.resize is not None:
             x_sum = resize(x_sum, (origW,origH))
         if not self.return_soft_prob:
