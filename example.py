@@ -26,14 +26,12 @@ def run_example(model, device, loader):
         features = model(batch)
 
 
-if __name__ == "__main__":
+def time_example(repeats=10, batch_size=16):
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
     model = AutoMorphModel(return_as_tensor=False, lightweight=True)
     model = model.to(device)
 
-    repeats = 10
-    batch_size = 16
     dataset = RepeatImageDataset('example_images/image3.png', repeat=batch_size*repeats)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
@@ -46,3 +44,8 @@ if __name__ == "__main__":
 
     print(f"Average time per batch: {t_total:.4f} seconds")
     model.vessel_feature_calculator.print_timing_summary()
+
+if __name__ == "__main__":
+
+
+    time_example(repeats=10, batch_size=16)

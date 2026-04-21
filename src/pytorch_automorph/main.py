@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import os
 import glob
+import re
 import matplotlib.pyplot as plt
 from time import time
 from .segmentation_models import Optic_Disc_Segmentation, Vessel_Segmentation,ArteryVeinSegmenter
@@ -124,6 +125,19 @@ class AutoMorphModel(nn.Module):
         return feature_tensor
 
     def plot_masks(self, savepath, masks, titles=["Vessels","Veins","Arteries","Zone B","Zone B Veins","Zone B Arteries","Zone C","Zone C Veins","Zone C Arteries"], img_names=None):
+        
+        def fetch_last_samplename(savepath):
+            files = glob.glob(os.path.join(savepath, "*", "*.png"))
+            nums = []
+
+            for f in files:
+                name = os.path.splitext(os.path.basename(f))[0]
+                m = re.search(r"Sample(\d+)", name)
+                if m:
+                    nums.append(int(m.group(1)))
+
+            return max(nums) + 1 if nums else 0
+
         os.makedirs(savepath, exist_ok=True)
         B, C, H, W = masks.shape
         assert C == len(titles), "Number of channels in masks should match number of titles"
@@ -131,7 +145,8 @@ class AutoMorphModel(nn.Module):
             assert len(img_names) == B, "Number of image names should match batch size"
             names = [os.path.splitext(os.path.basename(n))[0] for n in img_names]
         else:
-            names = [f"Sample{b}" for b in range(B)]
+            b_start = fetch_last_samplename(savepath)
+            names = [f"Sample{b}" for b in range(b_start, b_start + B)]
         # Create subfolders per title
         for title in titles:
             os.makedirs(os.path.join(savepath, title.replace(" ", "_")), exist_ok=True)
