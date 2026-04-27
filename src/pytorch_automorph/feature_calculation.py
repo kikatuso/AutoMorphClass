@@ -361,7 +361,7 @@ class Vessel_Features(FeatureExtractor):
             a, b = indices[i], indices[i+1]
             xs, ys = x[a:b+1], y[a:b+1]
             Lc_si = self._curve_length(xs, ys)
-            Lx_si = self._chord_length(xs, ys) + self.eps
+            Lx_si = self._chord_length(xs, ys)
             if Lx_si > 0:
                 acc += (Lc_si / Lx_si) - 1
 
@@ -437,8 +437,10 @@ class Vessel_Features(FeatureExtractor):
         """
         if len(x) < 2:
             raise ValueError("Given curve must have at least 2 elements")
-
-        return self._curve_length(x, y)/(self._chord_length(x, y) + self.eps)
+        chord_len = self._chord_length(x, y)
+        if chord_len < self.eps:
+            return 0.0
+        return self._curve_length(x, y)/(self._chord_length(x, y))
 
     def normalize_curve(self,x, y):
         x=np.array(x)
