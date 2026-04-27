@@ -4,6 +4,7 @@ import glob
 from pathlib import Path
 import torch 
 import torch.nn as nn
+import torch.nn.functional as F
 from torchvision.transforms.functional import resize
 
 from .modules.conv_blocks import DoubleConv, Down, OutConv, Up_new
@@ -11,10 +12,11 @@ from .modules.conv_blocks import DoubleConv, Down, OutConv, Up_new
 
 class Vessel_Segmentation(nn.Module):
     def __init__(self,checkpoint_folder='checkpoints/vessel_segmentation/',
-                input_channels=3, n_filters = 32, n_classes=1, bilinear=False,ignore_keys=[],lightweight=False,return_soft_prob=False,resize=720):
+                input_channels=3, n_filters = 32, n_classes=1, bilinear=False,ignore_keys=[],lightweight=False,return_soft_prob=False,resize=720,remove_border=True):
         super().__init__()  
         self.return_soft_prob = return_soft_prob
         self.resize = resize
+        self.remove_border = remove_border
         basedir = os.path.dirname(os.path.abspath(__file__))
         checkpoint_folder = os.path.join(basedir, checkpoint_folder)
         self.pth_files = glob.glob(os.path.join(checkpoint_folder, '**', 'G_best_F1_epoch.pth'), recursive=True)
@@ -28,16 +30,6 @@ class Vessel_Segmentation(nn.Module):
             
 
     def preprocess(self, img, threshold=40.0/255.0):
-        origW, origH = img.shape[-2:]
-        if self.resize is not None:
-            W, H = max(origW, self.resize), max(origH, self.resize)
-            img = resize(img, (W, H))
-        else:
-            W, H = origW, origH
-        if img.dim() == 3:
-            img = img.unsqueeze(0)
-        assert img.shape[1] == 3  # Check for 3 color channels
-
         # Blue channel zero-check: if blue channel is all zero, duplicate green channel
         if img[:, 2, :, :].sum() == 0:
             img = img[:, 1:2, :, :].expand(-1, 3, -1, -1).clone()
@@ -53,20 +45,52 @@ class Vessel_Segmentation(nn.Module):
 
         # Normalize entire image using foreground statistics
         img = (img - mean) / std
-
+        return img
+    
+    def _resize(self, img):
+        origW, origH = img.shape[-2:]
+        if self.resize is not None:
+            W, H = max(origW, self.resize), max(origH, self.resize)
+            img = resize(img, (W, H))
+        else:
+            W, H = origW, origH
+        if img.dim() == 3:
+            img = img.unsqueeze(0)
+        assert img.shape[1] == 3  # Check for 3 color channels
         return img, origW, origH
 
 
+    def _remove_border(self, img, r = 20):
+        img_gray = img.mean(dim=1, keepdim=True)  # (B,1,H,W)
+        # threshold
+        mask = (img_gray > 10/255.0).float()
+        k = 2 * r + 1
+        eroded = -F.max_pool2d(-mask, kernel_size=k, stride=1, padding=k // 2)
+        return eroded
+        
+        
+
     def forward(self, x):
-        x,origW,origH = self.preprocess(x)
-        mask_preds = [model(x) for model in self.models]
+        x, origW, origH = self._resize(x)
+        x_processed = self.preprocess(x)
+        mask_preds = [model(x_processed) for model in self.models]
         x_sum = sum(mask_preds) / len(mask_preds)
-        if self.resize is not None:
-            x_sum = resize(x_sum, (origW,origH))
         if not self.return_soft_prob:
             x_sum = (x_sum > 0.5).float()
+        if self.remove_border:
+            eroded_mask = self._remove_border(x)
+            x_sum = x_sum * eroded_mask
         return x_sum
     
+
+def disk_kernel(radius):
+    y, x = torch.meshgrid(
+        torch.arange(-radius, radius + 1),
+        torch.arange(-radius, radius + 1),
+        indexing="ij"
+    )
+    mask = (x**2 + y**2) <= radius**2
+    return mask.float()
 
 class BaseSegmenter(nn.Module):
     def __init__(self, input_channels, n_filters, n_classes, bilinear=False):

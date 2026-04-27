@@ -45,8 +45,6 @@ class Optic_Disc_Segmentation(nn.Module):
             pooled = self.models[ridx](x)
         if not self.return_soft_prob:
             pooled = (pooled > 0.5).float()
-        if self.resize is not None:
-            pooled = resize(pooled, (origW, origH))
         return pooled
         
 

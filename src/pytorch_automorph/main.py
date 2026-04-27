@@ -3,6 +3,7 @@ import torch.nn as nn
 import os
 import glob
 import re
+from PIL import Image
 import matplotlib.pyplot as plt
 from time import time
 from .segmentation_models import Optic_Disc_Segmentation, Vessel_Segmentation,ArteryVeinSegmenter
@@ -25,9 +26,9 @@ class AutoMorphModel(nn.Module):
     def __init__(self, return_as_tensor=True,lightweight=False, savemask_path=None,include_zones=True):
         super().__init__()
         self.include_zones = include_zones
-        self.optic_disc_segmentator = Optic_Disc_Segmentation(resize=512,lightweight=lightweight)  
+        self.optic_disc_segmentator = Optic_Disc_Segmentation(resize=912,lightweight=lightweight)  
         self.vascular_segmentator = Vessel_Segmentation(resize=912,lightweight=lightweight) 
-        self.artery_vein_segmentator = ArteryVeinSegmenter(resize=720,lightweight=lightweight)  
+        self.artery_vein_segmentator = ArteryVeinSegmenter(resize=912,lightweight=lightweight)  
         self.optic_disc_cup_feature_calculator = AutoMorphNumpyWrapper(Optic_Disc_Cup_Features(),num_channels=2,return_masks=True)
         self.vessel_feature_calculator = AutoMorphNumpyWrapper(Vessel_Features(),num_channels=1)
         self.return_as_tensor = return_as_tensor
@@ -153,16 +154,10 @@ class AutoMorphModel(nn.Module):
         for b in range(B):
             for c in range(C):
                 folder = os.path.join(savepath, titles[c].replace(" ", "_"))
-                fig = plt.figure(figsize=(5, 5))
-                plt.imshow(masks[b, c].detach().cpu().numpy(), cmap='gray')
-                plt.axis('off')
-                plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
-                plt.savefig(
-                    os.path.join(folder, f"{names[b]}.png"),
-                    bbox_inches='tight',
-                    pad_inches=0
-                )
-                plt.close(fig)
+                img = masks[b, c].detach().cpu().numpy()
+                img = (img * 255).astype('uint8')
+                Image.fromarray(img).save(os.path.join(folder, f"{names[b]}.png"))
+
     
     def forward(self, x, x_names=None):
         B = x.shape[0]
@@ -178,8 +173,8 @@ class AutoMorphModel(nn.Module):
         invalid_disc_mask = (disc_tensor == -1).all(dim=1)
 
         # --- Step 3: Vessel features ---
-        # vessel_output shape: (B, 9, H, W)
-        vessel_long = vessel_output.reshape(-1, x.shape[2], x.shape[3]).unsqueeze(1)
+        # vessel_output shape: (B, 9, H, W) to (B*9, H, W) for feature calculation; will reshape back later
+        vessel_long = vessel_output.reshape(-1,912,912).unsqueeze(1)
 
         vessel_features_long = self.vessel_feature_calculator(vessel_long)
         # each value shape: (B*9,)

@@ -7,6 +7,7 @@ import numpy as np
 import cv2
 import sys
 from .tortuosity_utils import detect_vessel_border, order_vessel_points, split_into_windows
+from .vessel_postprocess import postprocess_vessels
 
 
 class AutoMorphNumpyWrapper:
@@ -257,7 +258,9 @@ class Optic_Disc_Cup_Features(FeatureExtractor):
             cdr_horizontal = cdr_horizontal
         )
 
-        return feats,np.stack([disc, cup], axis=-1) 
+        disc01 = disc / 255.0
+        cup01 = cup / 255.0
+        return feats,np.stack([disc01, cup01], axis=-1) 
     
     def __call__(self, img):
         if img.shape[2] == 3:
@@ -270,13 +273,14 @@ class Optic_Disc_Cup_Features(FeatureExtractor):
 
 
 class Vessel_Features(FeatureExtractor):
-    def __init__(self,return_skeleton=False, min_pixels_per_vessel=15, eps=1e-8):
+    def __init__(self,return_skeleton=False, min_pixels_per_vessel=15, eps=1e-8, apply_vessel_postprocess=False):
         """
         Submodule to calculate vessel features
         """
         self.return_skeleton = return_skeleton
         self.min_pixels_per_vessel = min_pixels_per_vessel
         self.eps = eps
+        self.apply_vessel_postprocess = apply_vessel_postprocess
         super().__init__()
         
     @property
@@ -517,6 +521,8 @@ class Vessel_Features(FeatureExtractor):
 
         Z = (Z>0).astype(np.uint8)
 
+        if self.apply_vessel_postprocess:
+            Z = postprocess_vessels(Z)
         if Z_skeleton is None:
             Z_skeleton = skeletonize(Z)
         vessel_density = self._vessel_density(Z)

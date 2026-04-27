@@ -57,15 +57,13 @@ class ArteryVeinSegmenter(nn.Module):
         x = self._fix_scale(x)
         if self.resize is not None:
             oH, oW = x.shape[2], x.shape[3]
-            x = TF.resize(x, [self.resize, self.resize], interpolation=TF.InterpolationMode.BILINEAR)
+            x = TF.resize(x, [self.resize, self.resize])
         mean = sum(model(x) for model in self.models) / len(self.models)
         pred = mean.argmax(dim=1, keepdim=True)  # (B,1,H,W)
         artery  = (pred == 1).float()
         vein    = (pred == 2).float()
         overlap = (pred == 3).float()
-        output = torch.cat([artery, overlap, vein], dim=1) * 255.0
-        if self.resize is not None:
-            output = TF.resize(output, [oH, oW], interpolation=TF.InterpolationMode.NEAREST)
+        output = torch.cat([artery, overlap, vein], dim=1) 
         return output
 
 

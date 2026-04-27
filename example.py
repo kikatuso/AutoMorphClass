@@ -49,3 +49,4 @@ if __name__ == "__main__":
 
 
     time_example(repeats=10, batch_size=16)
+
