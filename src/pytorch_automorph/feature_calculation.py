@@ -440,7 +440,7 @@ class Vessel_Features(FeatureExtractor):
         chord_len = self._chord_length(x, y)
         if chord_len < self.eps:
             return 0.0
-        return self._curve_length(x, y)/(self._chord_length(x, y))
+        return self._curve_length(x, y)/chord_len
 
     def normalize_curve(self,x, y):
         x=np.array(x)
