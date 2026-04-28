@@ -6,6 +6,8 @@ import re
 from PIL import Image
 import matplotlib.pyplot as plt
 from time import time
+from torchvision.transforms.functional import resize as TF_resize
+from torchvision.transforms import InterpolationMode
 from .segmentation_models import Optic_Disc_Segmentation, Vessel_Segmentation,ArteryVeinSegmenter
 from .feature_calculation import AutoMorphNumpyWrapper, Optic_Disc_Cup_Features,Vessel_Features
  
@@ -26,9 +28,9 @@ class AutoMorphModel(nn.Module):
     def __init__(self, return_as_tensor=True,lightweight=False, savemask_path=None,include_zones=True):
         super().__init__()
         self.include_zones = include_zones
-        self.optic_disc_segmentator = Optic_Disc_Segmentation(resize=912,lightweight=lightweight)  
+        self.optic_disc_segmentator = Optic_Disc_Segmentation(resize=512,lightweight=lightweight)  
         self.vascular_segmentator = Vessel_Segmentation(resize=912,lightweight=lightweight) 
-        self.artery_vein_segmentator = ArteryVeinSegmenter(resize=912,lightweight=lightweight)  
+        self.artery_vein_segmentator = ArteryVeinSegmenter(resize=720,lightweight=lightweight)  
         self.optic_disc_cup_feature_calculator = AutoMorphNumpyWrapper(Optic_Disc_Cup_Features(),num_channels=2,return_masks=True)
         self.vessel_feature_calculator = AutoMorphNumpyWrapper(Vessel_Features(),num_channels=1)
         self.return_as_tensor = return_as_tensor
@@ -107,8 +109,10 @@ class AutoMorphModel(nn.Module):
     @torch.no_grad()
     def create_masks(self, x):
         optic_disc_mask = self.optic_disc_segmentator(x)[:,1:,:,:]  # take last two channels only; first channel is background
+        optic_disc_mask = self._resize_to_920(optic_disc_mask) # resize to match vessel mask size
         vessel_mask = self.vascular_segmentator(x) # shape: (B, 1, H, W)
         artery_vein_mask = self.artery_vein_segmentator(x)[:,[0,2],:,:]  # take artery and vein channels only; red as vein, blue as artery
+        artery_vein_mask = self._resize_to_920(artery_vein_mask) # resize to match vessel mask size
         all_vessels_mask = torch.cat([vessel_mask, artery_vein_mask], dim=1)
         if self.include_zones:
             zone_b, zone_c = self.define_zones(optic_disc_mask) # shape: (B, 1, H, W)
@@ -158,6 +162,8 @@ class AutoMorphModel(nn.Module):
                 img = (img * 255).astype('uint8')
                 Image.fromarray(img).save(os.path.join(folder, f"{names[b]}.png"))
 
+    def _resize_to_920(self, mask):
+        return TF_resize(mask, (912, 912), interpolation=InterpolationMode.NEAREST)
     
     def forward(self, x, x_names=None):
         B = x.shape[0]
