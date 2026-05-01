@@ -25,9 +25,11 @@ mask_prefixes = [
 
 
 class AutoMorphModel(nn.Module):
-    def __init__(self, return_as_tensor=True,lightweight=False, savemask_path=None,include_zones=True):
+    def __init__(self, return_as_tensor=True,lightweight=False, savemask_path=None,include_zones=True,include_artery_vein=True,include_optic_disc=True):
         super().__init__()
         self.include_zones = include_zones
+        self.include_artery_vein = include_artery_vein
+        self.include_optic_disc = include_optic_disc
         self.optic_disc_segmentator = Optic_Disc_Segmentation(resize=512,lightweight=lightweight)  
         self.vascular_segmentator = Vessel_Segmentation(resize=912,lightweight=lightweight) 
         self.artery_vein_segmentator = ArteryVeinSegmenter(resize=720,lightweight=lightweight)  
@@ -107,22 +109,45 @@ class AutoMorphModel(nn.Module):
         return maskB, maskC
 
     @torch.no_grad()
-    def create_masks(self, x):
-        optic_disc_mask = self.optic_disc_segmentator(x)[:,1:,:,:]  # take last two channels only; first channel is background
-        optic_disc_mask = self._resize_to_920(optic_disc_mask) # resize to match vessel mask size
-        vessel_mask = self.vascular_segmentator(x) # shape: (B, 1, H, W)
-        artery_vein_mask = self.artery_vein_segmentator(x)[:,[0,2],:,:]  # take artery and vein channels only; red as vein, blue as artery
-        artery_vein_mask = self._resize_to_920(artery_vein_mask) # resize to match vessel mask size
-        all_vessels_mask = torch.cat([vessel_mask, artery_vein_mask], dim=1)
-        if self.include_zones:
-            zone_b, zone_c = self.define_zones(optic_disc_mask) # shape: (B, 1, H, W)
-            orig = all_vessels_mask # shape: (B, 3, H, W)
-            zone_b_part = all_vessels_mask * zone_b # shape: (B, 3, H, W)
-            zone_c_part = all_vessels_mask * zone_c # shape: (B, 3, H, W)
-            vessel_output = torch.cat([orig, zone_b_part, zone_c_part], dim=1) # shape: (B, 9, H, W)
+    def create_masks(self, x, vessel_mask=None, optic_disc_mask=None, artery_vein_mask=None):
+        # --- Vessel (always required) ---
+        if vessel_mask is None:
+            vessel_mask = self.vascular_segmentator(x)
+
+        parts = [vessel_mask]
+
+        # --- Artery / Vein ---
+        if self.include_artery_vein:
+            if artery_vein_mask is None:
+                artery_vein_mask = self.artery_vein_segmentator(x)[:, [0, 2]]
+            artery_vein_mask = self._resize_to_920(artery_vein_mask)
+            parts.append(artery_vein_mask)
+
+        all_vessels = torch.cat(parts, dim=1)
+
+        # --- Optic disc ---
+        if self.include_optic_disc:
+            if optic_disc_mask is None:
+                optic_disc_mask = self.optic_disc_segmentator(x)[:, 1:]
+            optic_disc_mask = self._resize_to_920(optic_disc_mask)
         else:
-            vessel_output = all_vessels_mask # shape: (B, 3, H, W)
-        return vessel_output, optic_disc_mask
+            optic_disc_mask = None
+
+        # --- Zones ---
+        if self.include_zones:
+            if optic_disc_mask is None:
+                raise ValueError("Zones require optic disc mask")
+
+            zone_b, zone_c = self.define_zones(optic_disc_mask)
+
+            base = all_vessels
+            all_vessels = torch.cat([
+                base,
+                base * zone_b,
+                base * zone_c
+            ], dim=1)
+
+        return all_vessels, optic_disc_mask
     
     def _to_tensor(self, features):
         keys = sorted(features.keys())
@@ -165,51 +190,79 @@ class AutoMorphModel(nn.Module):
     def _resize_to_920(self, mask):
         return TF_resize(mask, (912, 912), interpolation=InterpolationMode.NEAREST)
     
-    def forward(self, x, x_names=None):
+    @torch.no_grad()
+    def forward(
+        self,
+        x,
+        x_names=None,
+        vessel_masks=None,
+        optic_disc_masks=None,
+        artery_vein_masks=None
+    ):
         B = x.shape[0]
 
-        # --- Step 1: Create masks ---
-        vessel_output, optic_disc_mask = self.create_masks(x)
-        # --- Step 2: Optic disc features ---
-        optic_disc_cup_features, optic_disc_mask = self.optic_disc_cup_feature_calculator(optic_disc_mask)
-        # Stack disc features to shape (B, 6)
-        disc_tensor = self._to_tensor(optic_disc_cup_features)
+        # --- Step 1: Masks (with overrides) ---
+        vessel_output, optic_disc_mask = self.create_masks(
+            x,
+            vessel_mask=vessel_masks,
+            optic_disc_mask=optic_disc_masks,
+            artery_vein_mask=artery_vein_masks
+        )
 
-        # Per-image invalid mask (B,)
-        invalid_disc_mask = (disc_tensor == -1).all(dim=1)
+        features = {}
+
+        # --- Step 2: Optic disc features ---
+        if self.include_optic_disc:
+            disc_feats, optic_disc_mask = self.optic_disc_cup_feature_calculator(optic_disc_mask)
+            features.update(disc_feats)
+
+            disc_tensor = self._to_tensor(disc_feats)
+            invalid_disc_mask = (disc_tensor == -1).all(dim=1)
+        else:
+            invalid_disc_mask = torch.zeros(B, dtype=torch.bool, device=x.device)
 
         # --- Step 3: Vessel features ---
-        # vessel_output shape: (B, 9, H, W) to (B*9, H, W) for feature calculation; will reshape back later
-        vessel_long = vessel_output.reshape(-1,912,912).unsqueeze(1)
+        B, C, H, W = vessel_output.shape
+        vessel_long = vessel_output.reshape(B * C, H, W).unsqueeze(1)
 
         vessel_features_long = self.vessel_feature_calculator(vessel_long)
-        # each value shape: (B*9,)
 
-        vessel_features = {}
+        # dynamic prefixes
+        prefixes = ["Vessel"]
+        if self.include_artery_vein:
+            prefixes += ["Artery", "Vein"]
+
+        if self.include_zones:
+            base = prefixes.copy()
+            prefixes = base + [f"ZoneB_{p}" for p in base] + [f"ZoneC_{p}" for p in base]
 
         for key, value in vessel_features_long.items():
-            # reshape to (B, 9/3)
-            nrows = 9 if self.include_zones else 3
-            value = value.view(B, nrows)
+            value = value.view(B, C)
+            for i, prefix in enumerate(prefixes):
+                features[f"{prefix}_{key}"] = value[:, i]
 
-            for i, prefix in enumerate(mask_prefixes):
-                vessel_features[prefix + key] = value[:, i]
+        # --- Step 4: Invalidate zones ---
+        if self.include_zones:
+            for k in features:
+                if k.startswith(("ZoneB_", "ZoneC_")):
+                    features[k][invalid_disc_mask] = -1
 
-        # --- Step 4: Suppress ZoneB / ZoneC per invalid image ---
-        for key in vessel_features:
-            if key.startswith(("ZoneB_", "ZoneC_")):
-                vessel_features[key][invalid_disc_mask] = -1
-
-        # --- Step 5: Merge features ---
-        features = {**optic_disc_cup_features, **vessel_features}
-    
+        # --- Step 5: Optional plotting ---
         if self.savemask_path is not None:
-            self.plot_masks(self.savemask_path,vessel_output.clone(),img_names=x_names)
-            self.plot_masks(self.savemask_path,optic_disc_mask.clone(),titles=["Optic Disc","Optic Cup"],img_names=x_names)
+            self.plot_masks(self.savemask_path, vessel_output.clone(), img_names=x_names)
 
-        # --- Step 6: Optional tensor conversion ---
+            if self.include_optic_disc:
+                self.plot_masks(
+                    self.savemask_path,
+                    optic_disc_mask.clone(),
+                    titles=["Optic Disc", "Optic Cup"],
+                    img_names=x_names
+                )
+
+        # --- Step 6: Optional tensor ---
         if self.return_as_tensor:
             features = self._to_tensor(features)
+
         return features
 
 # todo: add calibre features 
