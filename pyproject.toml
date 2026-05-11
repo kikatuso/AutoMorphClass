@@ -16,5 +16,5 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0", "wheel","umap-learn"]
 build-backend = "setuptools.build_meta"
