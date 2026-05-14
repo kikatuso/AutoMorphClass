@@ -128,7 +128,7 @@ class AutoMorphModel(nn.Module):
         all_vessels = torch.cat(parts, dim=1)
 
         # --- Optic disc ---
-        if self.include_optic_disc:
+        if self.include_optic_disc or self.include_zones:
             if optic_disc_mask is None:
                 optic_disc_mask = self.optic_disc_segmentator(x)[:, 1:]
             optic_disc_mask = self._resize_to_920(optic_disc_mask)
@@ -141,7 +141,8 @@ class AutoMorphModel(nn.Module):
                 raise ValueError("Zones require optic disc mask")
 
             zone_b, zone_c = self.define_zones(optic_disc_mask)
-
+            if not self.include_optic_disc:
+                optic_disc_mask = None 
             base = all_vessels
             all_vessels = torch.cat([
                 base,
