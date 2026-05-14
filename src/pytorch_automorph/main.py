@@ -37,6 +37,7 @@ class AutoMorphModel(nn.Module):
         self.vessel_feature_calculator = AutoMorphNumpyWrapper(Vessel_Features(),num_channels=1)
         self.return_as_tensor = return_as_tensor
         self.savemask_path = savemask_path
+
         for param in self.parameters():
             param.requires_grad = False  
         self.eval()
@@ -113,6 +114,8 @@ class AutoMorphModel(nn.Module):
         # --- Vessel (always required) ---
         if vessel_mask is None:
             vessel_mask = self.vascular_segmentator(x)
+        else:
+            vessel_mask = self._resize_to_920(vessel_mask)
 
         parts = [vessel_mask]
 
@@ -122,7 +125,6 @@ class AutoMorphModel(nn.Module):
                 artery_vein_mask = self.artery_vein_segmentator(x)[:, [0, 2]]
             artery_vein_mask = self._resize_to_920(artery_vein_mask)
             parts.append(artery_vein_mask)
-
         all_vessels = torch.cat(parts, dim=1)
 
         # --- Optic disc ---
@@ -249,7 +251,22 @@ class AutoMorphModel(nn.Module):
 
         # --- Step 5: Optional plotting ---
         if self.savemask_path is not None:
-            self.plot_masks(self.savemask_path, vessel_output.clone(), img_names=x_names)
+
+            titles = ["Vessels"]
+
+            if self.include_artery_vein:
+                titles += ["Veins", "Arteries"]
+
+            if self.include_zones:
+                titles += ["Zone B"]
+                if self.include_artery_vein:
+                    titles += ["Zone B Veins", "Zone B Arteries"]
+
+                titles += ["Zone C"]
+                if self.include_artery_vein:
+                    titles += ["Zone C Veins", "Zone C Arteries"]
+
+            self.plot_masks(self.savemask_path, vessel_output.clone(), img_names=x_names, titles=titles)
 
             if self.include_optic_disc:
                 self.plot_masks(
